@@ -1,0 +1,399 @@
+/*
+ * The quotation page. These rules are shared by the editor and by PDF export, which is
+ * what makes the exported PDF match the on-screen page. All page geometry is in mm/pt.
+ */
+
+@font-face {
+  font-family: 'Outfit';
+  src: url('../assets/fonts/Outfit-Regular.ttf') format('truetype');
+  font-weight: 400;
+  font-style: normal;
+  font-display: block;
+}
+
+@font-face {
+  font-family: 'Outfit';
+  src: url('../assets/fonts/Outfit-Bold.ttf') format('truetype');
+  font-weight: 700;
+  font-style: normal;
+  font-display: block;
+}
+
+.doc-root {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 24px;
+  width: max-content;
+  margin: 0 auto;
+  font-family: 'Outfit', 'Segoe UI', sans-serif;
+  color: #000;
+}
+
+.page {
+  position: relative;
+  flex: none;
+  width: 210mm;
+  height: 297mm;
+  overflow: hidden;
+  background: #fff;
+  font-size: 9pt;
+  line-height: 1.45;
+  font-kerning: normal;
+  box-shadow:
+    0 0 0 1px rgba(15, 15, 15, 0.06),
+    0 4px 14px rgba(15, 15, 15, 0.1);
+}
+
+.page-bg {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  user-select: none;
+}
+
+.page-body {
+  position: absolute;
+}
+
+.page-footer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  display: flex;
+  justify-content: center;
+  font-weight: 700;
+  text-align: center;
+}
+
+/* ------------------------------------------------------------ editable text */
+
+.et {
+  min-height: 1.45em;
+  outline: none;
+  white-space: pre-wrap;
+  overflow-wrap: break-word;
+  border-radius: 2px;
+}
+
+/* Justification is applied to collapsed whitespace; while typing the text stays ragged. */
+.et.is-justify:not(:focus) {
+  white-space: pre-line;
+}
+
+.et.u {
+  text-decoration: underline;
+}
+
+.editable .et {
+  min-width: 1.5em;
+  cursor: text;
+}
+
+.editable .et:hover {
+  background: rgba(35, 131, 226, 0.08);
+}
+
+.editable .et:focus {
+  background: rgba(35, 131, 226, 0.12);
+}
+
+.editable .et[data-placeholder]:empty::before {
+  content: attr(data-placeholder);
+  color: #bdbdbd;
+  font-weight: 400;
+  pointer-events: none;
+}
+
+/* ------------------------------------------------------------------- header */
+
+.hdr {
+  position: absolute;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  white-space: nowrap;
+  line-height: 1.26;
+}
+
+.hdr-name,
+.hdr-line {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  box-sizing: border-box;
+}
+
+.hdr .et {
+  min-height: 1.26em;
+  white-space: pre;
+  text-align: right;
+}
+
+.hdr-icon {
+  flex: none;
+  display: block;
+}
+
+.hdr-icon img {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+/* Logos sit above the page content, so one that overlaps the text can still be grabbed. */
+.logo {
+  position: absolute;
+  z-index: 1;
+}
+
+.logo img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  user-select: none;
+  pointer-events: none;
+}
+
+.logo.is-editable {
+  cursor: move;
+  touch-action: none;
+}
+
+.logo.is-editable:hover {
+  outline: 1px dashed rgba(35, 131, 226, 0.8);
+}
+
+.logo-handle {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 10px;
+  height: 10px;
+  border: 1.5px solid #2383e2;
+  border-radius: 2px;
+  background: #fff;
+  cursor: nwse-resize;
+  opacity: 0;
+  touch-action: none;
+}
+
+.logo:hover .logo-handle {
+  opacity: 1;
+}
+
+/* ------------------------------------------------------------------- blocks */
+
+.blk {
+  position: relative;
+}
+
+.blk-body {
+  position: relative;
+  border-radius: 2px;
+}
+
+.editable .blk:hover > .blk-body {
+  outline: 1px dashed rgba(55, 53, 47, 0.22);
+  outline-offset: 3px;
+}
+
+.editable .blk.is-selected > .blk-body {
+  outline: 1px solid rgba(35, 131, 226, 0.6);
+  outline-offset: 3px;
+}
+
+.text-block {
+  min-height: 1.45em;
+}
+
+/* fields */
+
+.fields {
+  display: grid;
+}
+
+.fields-col {
+  position: relative;
+  min-width: 0;
+}
+
+.field-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  min-height: 1.752em;
+  line-height: 1.26;
+}
+
+.field-label {
+  flex: none;
+  box-sizing: border-box;
+  padding-left: 1.9mm;
+}
+
+.field-value {
+  flex: 1;
+  min-width: 0;
+  padding-left: 1.9mm;
+}
+
+.field-row .et {
+  min-height: 1.26em;
+}
+
+/* items table */
+
+.items {
+  width: 100%;
+  border-collapse: collapse;
+  table-layout: fixed;
+}
+
+.items th,
+.items td {
+  position: relative;
+  padding: 0 1.9mm;
+  /* The hairline border is drawn one pixel thick, so the rows are a touch tighter to keep the 4.78 mm row pitch. */
+  line-height: 1.42;
+  border: 0.5pt solid #000;
+  font-weight: 400;
+  text-align: left;
+  vertical-align: top;
+}
+
+.items th {
+  font-weight: 700;
+}
+
+.items .et {
+  min-height: 1.42em;
+}
+
+.items .num {
+  text-align: right;
+}
+
+.items .total-label {
+  border-bottom: none;
+  border-left: none;
+  font-weight: 700;
+  text-align: right;
+}
+
+.items .total-value {
+  font-weight: 700;
+}
+
+.editable .items.amounts-hidden td.amount .et {
+  color: #b3b3b3;
+  font-style: italic;
+}
+
+/* list */
+
+.li {
+  display: flex;
+}
+
+/* The bullet is drawn rather than typed, so its size does not depend on the font's bullet glyph. */
+.li-bullet {
+  position: relative;
+  flex: none;
+  width: 6.35mm;
+  margin-left: 6.35mm;
+}
+
+.li-bullet::before {
+  content: '';
+  position: absolute;
+  top: 0.6em;
+  left: 0.25mm;
+  width: 0.36em;
+  height: 0.36em;
+  border-radius: 50%;
+  background: currentColor;
+  -webkit-print-color-adjust: exact;
+  print-color-adjust: exact;
+}
+
+.li .et {
+  flex: 1;
+  min-width: 0;
+}
+
+/* images */
+
+.images {
+  display: flex;
+  flex-wrap: wrap;
+}
+
+.img-item {
+  position: relative;
+  flex: none;
+}
+
+.img-item img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  user-select: none;
+}
+
+.caption {
+  padding-top: 0.1mm;
+  font-size: 9pt;
+  line-height: 1.26;
+}
+
+.caption.et {
+  min-height: 1.26em;
+}
+
+/* account */
+
+.account-heading {
+  font-weight: 700;
+}
+
+.acc-row {
+  display: flex;
+}
+
+.acc-label {
+  flex: none;
+}
+
+/* --------------------------------------------------------------- PDF export */
+
+@page {
+  size: A4;
+  margin: 0;
+}
+
+html.print-mode,
+html.print-mode body {
+  height: auto;
+  margin: 0;
+  overflow: visible;
+  background: #fff;
+}
+
+html.print-mode .doc-root {
+  gap: 0;
+  margin: 0;
+}
+
+html.print-mode .page {
+  box-shadow: none;
+  break-after: page;
+  break-inside: avoid;
+}
+
+html.print-mode .page:last-child {
+  break-after: auto;
+}

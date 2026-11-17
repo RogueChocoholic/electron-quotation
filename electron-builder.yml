@@ -1,0 +1,39 @@
+appId: com.roguechocoholic.quotationmaker
+productName: Quotation Maker
+copyright: Copyright (c) RogueChocoholic
+
+directories:
+  output: dist
+  buildResources: build
+
+files:
+  - out/**
+  - resources/**
+  - package.json
+
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  icon: build/icon.ico
+  # No spaces in the file name: GitHub rewrites them, and the updater would then not find the file.
+  artifactName: QuotationMaker-Setup-${version}.${ext}
+
+nsis:
+  oneClick: true
+  perMachine: false
+  deleteAppDataOnUninstall: false
+  shortcutName: Quotation Maker
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+
+# Where the installed app looks for new versions. Nothing is uploaded by the build
+# (it runs with --publish never); the release files are uploaded by hand.
+publish:
+  provider: github
+  owner: RogueChocoholic
+  repo: electron-quotation
+  releaseType: release

@@ -1,0 +1,40 @@
+{
+  "name": "electron-quotation",
+  "productName": "Quotation Maker",
+  "version": "1.0.0",
+  "description": "Desktop app for creating, templating and exporting quotations",
+  "main": "./out/main/index.js",
+  "author": "RogueChocoholic",
+  "homepage": "https://github.com/RogueChocoholic/electron-quotation",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/RogueChocoholic/electron-quotation.git"
+  },
+  "private": true,
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "start": "electron-vite preview",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p src/renderer/tsconfig.json",
+    "dist": "npm run build && electron-builder --win --publish never",
+    "smoke": "npm run build && node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "docx": "^9.15.4",
+    "electron-updater": "^6.8.11"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "^19.3.0",
+    "@types/react-dom": "^19.3.0",
+    "@vitejs/plugin-react": "^6.3.0",
+    "electron": "^45.3.3",
+    "electron-builder": "^26.18.0",
+    "electron-vite": "^6.0.0",
+    "playwright-core": "^1.65.1",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^7.0.2",
+    "vite": "^8.3.8"
+  }
+}

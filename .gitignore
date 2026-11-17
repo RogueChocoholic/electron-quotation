@@ -1,0 +1,10 @@
+node_modules/
+out/
+dist/
+.smoke/
+*.log
+
+package-lock.json
+
+*.pdf
+*.docx
