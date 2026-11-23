@@ -1,7 +1,7 @@
 {
   "name": "electron-quotation",
   "productName": "Quotation Maker",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Desktop app for creating, templating and exporting quotations",
   "main": "./out/main/index.js",
   "author": "RogueChocoholic",

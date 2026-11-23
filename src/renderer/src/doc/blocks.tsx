@@ -3,6 +3,7 @@ import {
   ACCOUNT_LABEL_W,
   ITEM_AMOUNT_W,
   ITEM_QTY_W,
+  MUTED_COLOR,
   accountRows,
   fmtAmount,
   fmtPrice,
@@ -68,7 +69,7 @@ export function FieldsBlockView({ block: b }: { block: FieldsBlock }) {
     setRows(side, (rows) => rows.map((r) => (r.id === id ? { ...r, ...patch } : r)))
 
   const addRow = (side: Side): void => {
-    const row: FieldRow = { id: uid(), label: '', value: '', bold: false, bind: null }
+    const row: FieldRow = { id: uid(), label: '', value: '', bold: false, muted: false, bind: null }
     setRows(side, (rows) => [...rows, row])
     focusEid(`${row.id}:l`)
   }
@@ -81,6 +82,7 @@ export function FieldsBlockView({ block: b }: { block: FieldsBlock }) {
     })
     return [
       { label: 'Bold label', checked: r.bold, onSelect: () => setRow(side, r.id, { bold: !r.bold }) },
+      { label: 'Grey text', checked: r.muted, onSelect: () => setRow(side, r.id, { muted: !r.muted }) },
       { separator: true },
       { heading: true, label: 'Value shows' },
       bindItem('Typed text', null),
@@ -123,7 +125,7 @@ export function FieldsBlockView({ block: b }: { block: FieldsBlock }) {
                 ? 'Date'
                 : ''
           return (
-            <div className="field-row" key={r.id}>
+            <div className="field-row" key={r.id} style={r.muted ? { color: MUTED_COLOR } : undefined}>
               <div className="field-label" style={{ width: mm(labelWidth), fontWeight: r.bold ? 700 : 400 }}>
                 <EditableText
                   eid={`${r.id}:l`}
@@ -168,15 +170,16 @@ export function FieldsBlockView({ block: b }: { block: FieldsBlock }) {
 // -------------------------------------------------------------------- items
 
 export function ItemsBlockView({ block: b, frag }: { block: ItemsBlock; frag: Fragment }) {
-  const { editable } = useDoc()
+  const { editable, openMenu } = useDoc()
   const mutate = useMutate<ItemsBlock>(b.id)
   const [start, end] = frag.rows ?? [0, b.rows.length]
 
   const setRow = (id: string, patch: Partial<ItemRow>): void =>
     mutate((x) => ({ ...x, rows: x.rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) }))
+  const removeRow = (id: string): void => mutate((x) => ({ ...x, rows: x.rows.filter((r) => r.id !== id) }))
 
   const addRowAfter = (afterId: string | null): void => {
-    const row: ItemRow = { id: uid(), description: '', qty: '1', price: '' }
+    const row: ItemRow = { id: uid(), description: '', qty: '1', price: '', hasQty: true }
     mutate((x) => {
       const index = afterId ? x.rows.findIndex((r) => r.id === afterId) : x.rows.length - 1
       const rows = [...x.rows]
@@ -224,7 +227,8 @@ export function ItemsBlockView({ block: b, frag }: { block: ItemsBlock; frag: Fr
       <tbody>
         {b.rows.slice(start, end).map((r) => (
           <tr key={r.id} data-items-row={r.id}>
-            <td>
+            {/* Without a quantity cell the description takes over the quantity column. */}
+            <td colSpan={r.hasQty ? 1 : 2}>
               <EditableText
                 eid={`${r.id}:d`}
                 value={r.description}
@@ -233,26 +237,53 @@ export function ItemsBlockView({ block: b, frag }: { block: ItemsBlock; frag: Fr
                 placeholder="Description"
               />
             </td>
-            <td className="num">
-              <EditableText eid={`${r.id}:q`} value={r.qty} onChange={(qty) => setRow(r.id, { qty })} placeholder="1" />
-            </td>
+            {r.hasQty && (
+              <td className="num">
+                <EditableText
+                  eid={`${r.id}:q`}
+                  value={r.qty}
+                  onChange={(qty) => setRow(r.id, { qty })}
+                  placeholder="1"
+                />
+              </td>
+            )}
             <td className="num amount" title={editable && b.hideRowAmounts ? 'Hidden in PDF and Word' : undefined}>
               <EditableText
                 eid={`${r.id}:p`}
                 value={r.price}
                 display={!editable && b.hideRowAmounts ? '' : fmtPrice(r.price)}
                 onChange={(price) => setRow(r.id, { price })}
-                placeholder="0"
+                placeholder={r.hasQty ? '0' : ''}
               />
               {editable && (
-                <button
-                  type="button"
-                  className="chrome row-del"
-                  title="Remove row"
-                  onClick={() => mutate((x) => ({ ...x, rows: x.rows.filter((row) => row.id !== r.id) }))}
-                >
-                  &times;
-                </button>
+                <>
+                  <button
+                    type="button"
+                    className="chrome row-del"
+                    title="Remove row"
+                    onClick={() => removeRow(r.id)}
+                  >
+                    &times;
+                  </button>
+                  <button
+                    type="button"
+                    className="chrome row-opt"
+                    title="Row options"
+                    onClick={(e) =>
+                      openMenu(e.currentTarget, [
+                        {
+                          label: 'No quantity cell',
+                          checked: !r.hasQty,
+                          onSelect: () => setRow(r.id, { hasQty: !r.hasQty })
+                        },
+                        { separator: true },
+                        { label: 'Remove row', danger: true, onSelect: () => removeRow(r.id) }
+                      ])
+                    }
+                  >
+                    &#8943;
+                  </button>
+                </>
               )}
             </td>
           </tr>

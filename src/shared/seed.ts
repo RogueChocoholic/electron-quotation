@@ -14,6 +14,15 @@ import type {
 
 export const SEED_ACCOUNT_ID = 'acc-default'
 
+/**
+ * Version of the built-in "Mobile Washroom" design.
+ *   1  the original layout, with the QUOTATION title above the details grid
+ *   2  title moved into the header beside the logo; event details in grey, with Time under Date
+ * Raise it when the built-in design changes; see `upgradeBuiltinDesign` in the main process.
+ */
+export const BUILTIN_DESIGN = 2
+export const BUILTIN_TEMPLATE_NAME = 'Mobile Washroom Quotation'
+
 export function defaultSettings(now = new Date()): Settings {
   const account: Account = {
     id: SEED_ACCOUNT_ID,
@@ -37,7 +46,8 @@ export function defaultSettings(now = new Date()): Settings {
       nextSeq: 18,
       seqYear: now.getFullYear()
     },
-    lastTemplateId: null
+    lastTemplateId: null,
+    builtinDesign: BUILTIN_DESIGN
   }
 }
 
@@ -62,7 +72,7 @@ export const TEXT_PRESETS: Record<TextPreset, Pick<TextBlock, 'size' | 'bold' | 
 }
 
 function field(label: string, value = '', extra: Partial<FieldRow> = {}): FieldRow {
-  return { id: uid(), label, value, bold: false, bind: null, ...extra }
+  return { id: uid(), label, value, bold: false, muted: false, bind: null, ...extra }
 }
 
 export function textBlock(text: string, preset: TextPreset, extra: Partial<TextBlock> = {}): TextBlock {
@@ -95,7 +105,7 @@ export function newBlock(type: BlockType, preset: TextPreset = 'body'): Block {
         qtyLabel: 'Qty',
         amountLabel: 'Amount (LKR)',
         totalLabel: 'Total',
-        rows: [{ id: uid(), description: '', qty: '1', price: '' }],
+        rows: [{ id: uid(), description: '', qty: '1', price: '', hasQty: true }],
         hideRowAmounts: false,
         size: 9
       }
@@ -133,10 +143,17 @@ function stamp(): Pick<QDoc, 'createdAt' | 'updatedAt'> {
   return { createdAt: now, updatedAt: now }
 }
 
-/** The built-in "Mobile Washroom" quotation design, rebuilt from the reference document. */
-export function buildDefaultTemplate(a: SeedAssets, accountId: string | null): QDoc {
+/**
+ * The built-in "Mobile Washroom" quotation design, rebuilt from the reference document.
+ *
+ * Older versions of the design can still be built. They are never offered to the user; they
+ * exist so that an untouched copy of an old design can be recognised and brought up to date.
+ */
+export function buildDefaultTemplate(a: SeedAssets, accountId: string | null, design = BUILTIN_DESIGN): QDoc {
+  const v1 = design < 2
   const header: HeaderConfig = {
     background: a.background.asset,
+    title: v1 ? null : { text: 'QUOTATION', x: 46.1, y: 12.9, size: 20, bold: true },
     logos: [
       {
         id: uid(),
@@ -157,28 +174,38 @@ export function buildDefaultTemplate(a: SeedAssets, accountId: string | null): Q
     detailsRight: 5.35
   }
 
-  const item = (description: string, qty: string) => ({ id: uid(), description, qty, price: '' })
+  const item = (description: string, qty: string) => ({ id: uid(), description, qty, price: '', hasQty: true })
   const bullet = (text: string) => ({ id: uid(), text })
 
   const blocks: Block[] = [
-    textBlock('QUOTATION', 'title', { spaceBefore: 1.1 }),
+    // Since design 2 the title is part of the header instead of the first section.
+    ...(v1 ? [textBlock('QUOTATION', 'title', { spaceBefore: 1.1 })] : []),
     {
       id: uid(),
       type: 'fields',
-      spaceBefore: 1.35,
-      left: [
-        field('Date', '', { bind: 'date' }),
-        field('Quotation No.:', '', { bind: 'number' }),
-        field('Event', '', { bold: true }),
-        field('Location:'),
-        field('Date:')
-      ],
+      spaceBefore: v1 ? 1.35 : 0,
+      left: v1
+        ? [
+            field('Date', '', { bind: 'date' }),
+            field('Quotation No.:', '', { bind: 'number' }),
+            field('Event', '', { bold: true }),
+            field('Location:'),
+            field('Date:')
+          ]
+        : [
+            field('Date', '', { bind: 'date' }),
+            field('Quotation No.:', '', { bind: 'number' }),
+            field('Event', '', { bold: true }),
+            field('Location:', '', { muted: true }),
+            field('Date:', '', { muted: true }),
+            field('Time:', '', { muted: true })
+          ],
       right: [
         field('Name:', '', { bind: 'customer' }),
         field('Address:'),
         field('Contact:'),
         field('Email:'),
-        field('Time:')
+        ...(v1 ? [field('Time:')] : [])
       ],
       split: 88.65,
       leftLabelWidth: 29.7,
@@ -188,7 +215,7 @@ export function buildDefaultTemplate(a: SeedAssets, accountId: string | null): Q
     {
       id: uid(),
       type: 'items',
-      spaceBefore: 2.3,
+      spaceBefore: v1 ? 2.3 : 3.7,
       descriptionLabel: 'Description',
       qtyLabel: 'Qty',
       amountLabel: 'Amount (LKR)',
@@ -232,7 +259,7 @@ export function buildDefaultTemplate(a: SeedAssets, accountId: string | null): Q
     {
       id: uid(),
       type: 'images',
-      spaceBefore: 1,
+      spaceBefore: v1 ? 1 : 1.5,
       images: [
         { id: uid(), asset: a.photoOutside.asset, ratio: a.photoOutside.width / a.photoOutside.height },
         { id: uid(), asset: a.photoInside.asset, ratio: a.photoInside.width / a.photoInside.height }
@@ -245,9 +272,12 @@ export function buildDefaultTemplate(a: SeedAssets, accountId: string | null): Q
     },
     { id: uid(), type: 'account', spaceBefore: 0, heading: 'Account Details:', size: 9 },
     textBlock(
-      'We trust the information provided in our quotation is in line with your requirements. And looking forward to the opportunity to service your needs and become a valued partner.\nIf you need further clarification in this regard, please contact us on 0777 69 44 55',
+      [
+        'We trust the information provided in our quotation is in line with your requirements. And looking forward to the opportunity to service your needs and become a valued partner.',
+        'If you need further clarification in this regard, please contact us on 0777 69 44 55'
+      ].join(v1 ? '\n' : '\n\n'),
       'body',
-      { color: '#808080', align: 'justify', spaceBefore: 4.9 }
+      { color: '#808080', align: 'justify', spaceBefore: v1 ? 4.9 : 4.5 }
     )
   ]
 
@@ -255,12 +285,12 @@ export function buildDefaultTemplate(a: SeedAssets, accountId: string | null): Q
     schema: 1,
     id: uid(),
     kind: 'template',
-    name: 'Mobile Washroom Quotation',
+    name: BUILTIN_TEMPLATE_NAME,
     number: '',
     date: '',
     accountId,
     header,
-    page: defaultPage(),
+    page: v1 ? defaultPage() : { ...defaultPage(), marginTop: 42.3 },
     blocks,
     ...stamp()
   }
@@ -276,7 +306,15 @@ export function buildBlankTemplate(accountId: string | null): QDoc {
     number: '',
     date: '',
     accountId,
-    header: { background: null, logos: [], companyName: 'Company name', lines: [], detailsTop: 8, detailsRight: 15 },
+    header: {
+      background: null,
+      logos: [],
+      title: null,
+      companyName: 'Company name',
+      lines: [],
+      detailsTop: 8,
+      detailsRight: 15
+    },
     page: { ...defaultPage(), marginTop: 30 },
     blocks: [
       textBlock('QUOTATION', 'title'),

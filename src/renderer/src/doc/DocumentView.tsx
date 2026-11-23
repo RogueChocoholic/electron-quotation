@@ -92,6 +92,24 @@ function HeaderView({ pageIndex }: { pageIndex: number }) {
       {h.logos.map((l) => (
         <LogoView key={l.id} logo={l} />
       ))}
+      {h.title && (
+        <div
+          className="hdr-title"
+          style={{
+            left: mm(h.title.x),
+            top: mm(h.title.y),
+            fontSize: pt(h.title.size),
+            fontWeight: h.title.bold ? 700 : 400
+          }}
+        >
+          <EditableText
+            eid={`hdr:title:${pageIndex}`}
+            value={h.title.text}
+            onChange={(text) => update((d) => (d.header.title ? patchHeader(d, { title: { ...d.header.title, text } }) : d))}
+            placeholder="Title"
+          />
+        </div>
+      )}
       <div className="hdr" style={{ top: mm(h.detailsTop), right: mm(h.detailsRight) }}>
         <div
           className="hdr-name"

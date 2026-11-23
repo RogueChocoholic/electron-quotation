@@ -8,6 +8,7 @@ import type {
   FieldBind,
   FieldRow,
   HeaderConfig,
+  HeaderTitle,
   PageConfig,
   QDoc,
   Settings
@@ -42,7 +43,7 @@ const BINDS = ['number', 'date', 'customer'] as const
 function fieldRow(v: unknown): FieldRow {
   const r = rec(v)
   const bind = BINDS.includes(r.bind as (typeof BINDS)[number]) ? (r.bind as FieldBind) : null
-  return { id: id(r.id), label: str(r.label), value: str(r.value), bold: bool(r.bold), bind }
+  return { id: id(r.id), label: str(r.label), value: str(r.value), bold: bool(r.bold), muted: bool(r.muted), bind }
 }
 
 function block(v: unknown): Block | null {
@@ -81,7 +82,14 @@ function block(v: unknown): Block | null {
         totalLabel: str(b.totalLabel, 'Total'),
         rows: arr(b.rows).map((x) => {
           const r = rec(x)
-          return { id: id(r.id), description: str(r.description), qty: str(r.qty), price: str(r.price) }
+          return {
+            id: id(r.id),
+            description: str(r.description),
+            qty: str(r.qty),
+            price: str(r.price),
+            // Rows saved before this option existed all have a quantity cell.
+            hasQty: bool(r.hasQty, true)
+          }
         }),
         hideRowAmounts: bool(b.hideRowAmounts),
         size: size(9)
@@ -119,10 +127,23 @@ function block(v: unknown): Block | null {
   }
 }
 
+function headerTitle(v: unknown): HeaderTitle | null {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return null
+  const t = rec(v)
+  return {
+    text: str(t.text),
+    x: num(t.x, 46, -100, 300),
+    y: num(t.y, 12.7, -100, 400),
+    size: num(t.size, 20, 4, 72),
+    bold: bool(t.bold, true)
+  }
+}
+
 function header(v: unknown): HeaderConfig {
   const h = rec(v)
   return {
     background: asset(h.background),
+    title: headerTitle(h.title),
     logos: arr(h.logos).flatMap((x) => {
       const l = rec(x)
       const a = asset(l.asset)
@@ -214,6 +235,8 @@ export function sanitizeSettings(v: unknown): Settings {
       nextSeq: Math.round(num(n.nextSeq, 1, 1, 999999999)),
       seqYear: Math.round(num(n.seqYear, d.numbering.seqYear, 2000, 9999))
     },
-    lastTemplateId: typeof s.lastTemplateId === 'string' && ID_RE.test(s.lastTemplateId) ? s.lastTemplateId : null
+    lastTemplateId: typeof s.lastTemplateId === 'string' && ID_RE.test(s.lastTemplateId) ? s.lastTemplateId : null,
+    // Settings written before this field existed belong to the first built-in design.
+    builtinDesign: Math.round(num(s.builtinDesign, 1, 1, 9999))
   }
 }

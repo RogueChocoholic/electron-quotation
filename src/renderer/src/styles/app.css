@@ -1399,6 +1399,32 @@ select.input {
   color: var(--red);
 }
 
+/* Sits just outside the remove button, in the page margin. */
+.row-opt {
+  position: absolute;
+  top: 0;
+  right: -13mm;
+  bottom: 0;
+  display: grid;
+  place-items: center;
+  width: 6mm;
+  padding: 0;
+  border: none;
+  background: none;
+  color: rgba(55, 53, 47, 0.45);
+  font-size: 14px;
+  opacity: 0;
+}
+
+.items tr:hover .row-opt,
+.row-opt:focus-visible {
+  opacity: 1;
+}
+
+.row-opt:hover {
+  color: rgba(55, 53, 47, 0.9);
+}
+
 .ghost-add {
   padding: 2px 6px;
   border: none;

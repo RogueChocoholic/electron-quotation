@@ -22,8 +22,10 @@ import {
   TextWrappingType,
   UnderlineType,
   VerticalAlignTable,
+  VerticalAnchor,
   VerticalPositionRelativeFrom,
   WidthType,
+  WpsShapeRun,
   type IBorderOptions,
   type IFloating,
   type ITableCellBorders
@@ -34,6 +36,7 @@ import {
   CAPTION_PT,
   CELL_PAD,
   FIELD_ROW_H,
+  FOOTER_COLOR,
   FOOTER_PT,
   HEADER_ICON,
   HEADER_ICON_GAP,
@@ -45,6 +48,7 @@ import {
   ITEM_QTY_W,
   LIST_HANGING,
   LIST_INDENT,
+  MUTED_COLOR,
   PAGE_H,
   PAGE_W,
   accountRows,
@@ -137,9 +141,36 @@ function gap(mm: number): Paragraph {
 
 function buildHeader(doc: QDoc): Header {
   const h = doc.header
-  const floats: ImageRun[] = []
+  const floats: (ImageRun | WpsShapeRun)[] = []
   const add = (run: ImageRun | null): void => {
     if (run) floats.push(run)
+  }
+
+  // The title goes in a borderless text box pinned to the page. Unlike a framed paragraph, a
+  // text box with no wrapping leaves the header's own lines exactly where they are. Text
+  // widths are not known here, so the box allows a full em per character: wide enough that
+  // the title never wraps, without covering the contact lines more than it has to.
+  if (h.title && h.title.text.trim() !== '') {
+    const t = h.title
+    const roomy = [...t.text].length * t.size * PT_MM + 2
+    floats.push(
+      new WpsShapeRun({
+        type: 'wps',
+        transformation: {
+          width: px(Math.max(20, Math.min(roomy, PAGE_W - t.x))),
+          height: px(t.size * NATURAL_LINE * PT_MM + 1)
+        },
+        floating: pageFloat(t.x, t.y),
+        bodyProperties: { margins: { top: 0, bottom: 0, left: 0, right: 0 }, verticalAnchor: VerticalAnchor.TOP },
+        children: [
+          new Paragraph({
+            spacing: { before: 0, after: 0, line: 240, lineRule: LineRuleType.AUTO },
+            run: { size: half(t.size) },
+            children: [new TextRun({ text: t.text, bold: t.bold, size: half(t.size) })]
+          })
+        ]
+      })
+    )
   }
 
   if (h.background) add(image(h.background, PAGE_W, PAGE_H, pageFloat(0, 0, true)))
@@ -156,7 +187,13 @@ function buildHeader(doc: QDoc): Header {
   // Each line is centred in its row. Word merges the space after one paragraph with the space
   // before the next, so all of the spacing is given as "space before".
   let carry = 0
-  const row = (text: string, pt: number, rowMm: number, underline: boolean, extra: ImageRun[] = []): Paragraph => {
+  const row = (
+    text: string,
+    pt: number,
+    rowMm: number,
+    underline: boolean,
+    extra: (ImageRun | WpsShapeRun)[] = []
+  ): Paragraph => {
     const pad = Math.max(0, (rowMm - pt * NATURAL_LINE * PT_MM) / 2)
     const before = carry + pad
     carry = pad
@@ -186,7 +223,9 @@ function buildFooter(doc: QDoc): Footer {
       new Paragraph({
         alignment: AlignmentType.CENTER,
         spacing: { before: 0, after: 0, line: 240, lineRule: LineRuleType.AUTO },
-        children: [new TextRun({ text: doc.page.footerText, bold: true, size: half(FOOTER_PT) })]
+        children: [
+          new TextRun({ text: doc.page.footerText, bold: true, size: half(FOOTER_PT), color: hex(FOOTER_COLOR) })
+        ]
       })
     ]
   })
@@ -221,7 +260,7 @@ function buildFields(b: FieldsBlock, doc: QDoc, contentW: number): Child[] {
     b.rightLabelWidth,
     Math.max(5, contentW - b.split - b.rightLabelWidth)
   ]
-  const cell = (text: string, col: number, bold: boolean): TableCell =>
+  const cell = (text: string, col: number, row: FieldRow | undefined, label: boolean): TableCell =>
     new TableCell({
       width: { size: tw(widths[col]), type: WidthType.DXA },
       verticalAlign: VerticalAlignTable.CENTER,
@@ -230,7 +269,14 @@ function buildFields(b: FieldsBlock, doc: QDoc, contentW: number): Child[] {
       children: [
         new Paragraph({
           spacing: { before: 0, after: 0, line: 240, lineRule: LineRuleType.AUTO },
-          children: [new TextRun({ text, bold, size: half(b.size) })]
+          children: [
+            new TextRun({
+              text,
+              bold: label && (row?.bold ?? false),
+              size: half(b.size),
+              color: row?.muted ? hex(MUTED_COLOR) : undefined
+            })
+          ]
         })
       ]
     })
@@ -240,10 +286,10 @@ function buildFields(b: FieldsBlock, doc: QDoc, contentW: number): Child[] {
     return new TableRow({
       height: { value: tw((FIELD_ROW_H * b.size) / 9), rule: HeightRule.ATLEAST },
       children: [
-        cell(l?.label ?? '', 0, l?.bold ?? false),
-        cell(fieldValue(l, doc), 1, false),
-        cell(r?.label ?? '', 2, r?.bold ?? false),
-        cell(fieldValue(r, doc), 3, false)
+        cell(l?.label ?? '', 0, l, true),
+        cell(fieldValue(l, doc), 1, l, false),
+        cell(r?.label ?? '', 2, r, true),
+        cell(fieldValue(r, doc), 3, r, false)
       ]
     })
   })
@@ -292,8 +338,9 @@ function buildItems(b: ItemsBlock, contentW: number): Child[] {
         new TableRow({
           cantSplit: true,
           children: [
-            cell(r.description, 0),
-            cell(r.qty, 1, { right: true }),
+            ...(r.hasQty
+              ? [cell(r.description, 0), cell(r.qty, 1, { right: true })]
+              : [cell(r.description, 0, { span: 2 })]),
             cell(b.hideRowAmounts ? '' : fmtPrice(r.price), 2, { right: true })
           ]
         })

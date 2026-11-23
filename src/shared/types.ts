@@ -21,10 +21,23 @@ export interface Logo {
   ratio: number
 }
 
+/** A line of text placed in the header band, e.g. the word "QUOTATION" beside the logo. */
+export interface HeaderTitle {
+  text: string
+  /** Position of the text's top-left corner from the page's top-left corner, in mm. */
+  x: number
+  y: number
+  /** Font size in pt. */
+  size: number
+  bold: boolean
+}
+
 export interface HeaderConfig {
   /** Full-page image drawn behind everything on every page. */
   background: AssetId | null
   logos: Logo[]
+  /** Shown on every page, like the rest of the header. Null when the design has none. */
+  title: HeaderTitle | null
   companyName: string
   lines: HeaderLine[]
   /** Offset of the contact details block from the top and right page edges, in mm. */
@@ -65,6 +78,8 @@ export interface FieldRow {
   label: string
   value: string
   bold: boolean
+  /** Label and value are printed in grey, for secondary details. */
+  muted: boolean
   /**
    * 'number' and 'date' rows show the quotation's own number and date.
    * 'customer' marks the row whose value is listed as the customer name.
@@ -89,6 +104,12 @@ export interface ItemRow {
   qty: string
   /** Price per unit, as typed. */
   price: string
+  /**
+   * False for a row without a quantity cell: the description runs across the quantity
+   * column, and the amount, if one is typed, counts as it stands. `qty` is kept so that
+   * it comes back when the cell is switched on again.
+   */
+  hasQty: boolean
 }
 
 export interface ItemsBlock extends BlockBase {
@@ -201,6 +222,8 @@ export interface Settings {
   defaultAccountId: string | null
   numbering: Numbering
   lastTemplateId: string | null
+  /** Version of the built-in design this PC's templates were last brought up to. */
+  builtinDesign: number
 }
 
 export interface PickedImage {

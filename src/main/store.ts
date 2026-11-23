@@ -4,7 +4,13 @@ import fs from 'node:fs'
 import path from 'node:path'
 import { collectAssets, docMeta, remapAssets, uid } from '@shared/calc'
 import { ASSET_RE, ID_RE, sanitizeDoc, sanitizeSettings } from '@shared/sanitize'
-import { buildDefaultTemplate, defaultSettings, type SeedAssets } from '@shared/seed'
+import {
+  BUILTIN_DESIGN,
+  BUILTIN_TEMPLATE_NAME,
+  buildDefaultTemplate,
+  defaultSettings,
+  type SeedAssets
+} from '@shared/seed'
 import type { AssetId, DocMeta, PickedImage, QDoc, Settings } from '@shared/types'
 import seedBackground from '../../resources/seed/background.png?asset'
 import seedIconLocation from '../../resources/seed/icon-1.png?asset'
@@ -165,21 +171,84 @@ export function createDefaultTemplate(): QDoc {
   return saveDoc(buildDefaultTemplate(seedAssets(), settings.defaultAccountId))
 }
 
-/** On the very first launch, writes the default settings and the built-in template. */
+/** A document's design with everything that differs from copy to copy (ids, dates, account) left out. */
+function designFingerprint(doc: QDoc): string {
+  const clean = sanitizeDoc(doc)
+  if (!clean) return ''
+  const { id: _id, createdAt: _created, updatedAt: _updated, accountId: _account, ...design } = clean
+  return JSON.stringify(design, (key, value) => (key === 'id' ? undefined : value))
+}
+
+/**
+ * Runs once after an update that ships a newer built-in design.
+ *
+ * Templates that are still an exact, unedited copy of the old built-in design are replaced
+ * with the new one. If the user has changed theirs, it is left alone and the new design is
+ * added beside it. Quotations are never touched.
+ */
+function upgradeBuiltinDesign(): void {
+  const settings = getSettings()
+  if (settings.builtinDesign >= BUILTIN_DESIGN) return
+  const assets = seedAssets()
+  const previous = designFingerprint(buildDefaultTemplate(assets, null, settings.builtinDesign))
+  const templates = listDocs()
+    .filter((m) => m.kind === 'template')
+    .flatMap((m) => getDoc(m.id) ?? [])
+
+  let replaced = 0
+  for (const old of templates) {
+    if (designFingerprint(old) !== previous) continue
+    saveDoc({ ...buildDefaultTemplate(assets, old.accountId), id: old.id, createdAt: old.createdAt })
+    replaced += 1
+  }
+  if (replaced === 0) {
+    const taken = templates.some((t) => t.name === BUILTIN_TEMPLATE_NAME)
+    saveDoc({
+      ...buildDefaultTemplate(assets, settings.defaultAccountId),
+      name: taken ? `${BUILTIN_TEMPLATE_NAME} (new design)` : BUILTIN_TEMPLATE_NAME
+    })
+  }
+  saveSettings({ ...settings, builtinDesign: BUILTIN_DESIGN })
+}
+
+/**
+ * On the very first launch, writes the default settings and the built-in template.
+ * On later launches, brings the built-in template up to date if an update changed it.
+ */
 export function ensureSeed(): void {
   ensureDirs()
-  if (fs.existsSync(settingsFile())) return
-  saveSettings(defaultSettings())
-  createDefaultTemplate()
+  if (!fs.existsSync(settingsFile())) {
+    saveSettings(defaultSettings())
+    createDefaultTemplate()
+    return
+  }
+  try {
+    upgradeBuiltinDesign()
+  } catch (err) {
+    // Not worth stopping the app for; it is tried again on the next start.
+    console.error('Could not update the built-in template:', err)
+  }
 }
 
 // ------------------------------------------------- template import/export
 
 const TEMPLATE_FORMAT = 'quotation-maker-template'
 
+/**
+ * Version 2 added the header title and grey detail rows; version 3 added table rows without
+ * a quantity cell. A file is marked with the version it needs, so that an app too old to show
+ * something says "update the app" instead of quietly dropping it.
+ */
+const TEMPLATE_VERSION = 3
+
+function templateVersionNeeded(doc: QDoc): number {
+  const rowsWithoutQty = doc.blocks.some((b) => b.type === 'items' && b.rows.some((r) => !r.hasQty))
+  return rowsWithoutQty ? 3 : 2
+}
+
 interface TemplateBundle {
   format: typeof TEMPLATE_FORMAT
-  version: 1
+  version: number
   template: QDoc
   /** Asset id to base64 file contents. */
   assets: Record<string, string>
@@ -192,7 +261,12 @@ export function buildTemplateBundle(doc: QDoc): string {
     const buf = readAsset(id)
     if (buf) assets[id] = buf.toString('base64')
   }
-  const bundle: TemplateBundle = { format: TEMPLATE_FORMAT, version: 1, template: { ...doc, kind: 'template' }, assets }
+  const bundle: TemplateBundle = {
+    format: TEMPLATE_FORMAT,
+    version: templateVersionNeeded(doc),
+    template: { ...doc, kind: 'template' },
+    assets
+  }
   return JSON.stringify(bundle)
 }
 
@@ -208,7 +282,7 @@ export function importTemplateBundle(text: string): QDoc {
   if (!bundle || typeof bundle !== 'object' || bundle.format !== TEMPLATE_FORMAT) {
     throw new Error('The file is not a Quotation Maker template.')
   }
-  if (bundle.version !== 1) {
+  if (typeof bundle.version !== 'number' || bundle.version < 1 || bundle.version > TEMPLATE_VERSION) {
     throw new Error('This template was made with a newer version of the app. Update the app and try again.')
   }
   const template = sanitizeDoc(bundle.template)

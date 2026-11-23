@@ -7,6 +7,7 @@ import type {
   AssetId,
   Block,
   FieldsBlock,
+  HeaderTitle,
   ImagesBlock,
   ItemsBlock,
   ListBlock,
@@ -214,6 +215,9 @@ function HeaderPanel() {
     update((d) => patchHeader(d, { logos: [...d.header.logos, logo] }))
   }
 
+  const setTitle = (patch: Partial<HeaderTitle>): void =>
+    update((d) => (d.header.title ? patchHeader(d, { title: { ...d.header.title, ...patch } }) : d))
+
   const setLine = (id: string, patch: { text?: string; icon?: AssetId | null }): void =>
     update((d) => patchHeader(d, { lines: d.header.lines.map((l) => (l.id === id ? { ...l, ...patch } : l)) }))
 
@@ -252,6 +256,71 @@ function HeaderPanel() {
           <LogoEditor key={l.id} logo={l} />
         ))}
         {h.logos.length > 0 && <p className="insp-hint">Logos can also be dragged and resized on the page.</p>}
+      </Group>
+
+      <Group
+        title="Header title"
+        action={
+          h.title ? (
+            <IconButton label="Remove title" onClick={() => update((d) => patchHeader(d, { title: null }))}>
+              <IconTrash />
+            </IconButton>
+          ) : (
+            <IconButton
+              label="Add title"
+              onClick={() =>
+                update((d) =>
+                  patchHeader(d, { title: { text: 'QUOTATION', x: 46.1, y: 12.9, size: 20, bold: true } })
+                )
+              }
+            >
+              <IconPlus />
+            </IconButton>
+          )
+        }
+      >
+        {h.title ? (
+          <>
+            <Field label="Text">
+              <TextInput value={h.title.text} onChange={(text) => setTitle({ text })} />
+            </Field>
+            <div className="grid-3">
+              <Field label="Size">
+                <NumberInput
+                  value={h.title.size}
+                  min={4}
+                  max={72}
+                  step={0.5}
+                  suffix="pt"
+                  onChange={(size) => setTitle({ size })}
+                />
+              </Field>
+              <Field label="From left">
+                <NumberInput
+                  value={h.title.x}
+                  min={-100}
+                  max={300}
+                  step={0.5}
+                  suffix="mm"
+                  onChange={(x) => setTitle({ x })}
+                />
+              </Field>
+              <Field label="From top">
+                <NumberInput
+                  value={h.title.y}
+                  min={-100}
+                  max={400}
+                  step={0.5}
+                  suffix="mm"
+                  onChange={(y) => setTitle({ y })}
+                />
+              </Field>
+            </div>
+            <Toggle checked={h.title.bold} onChange={(bold) => setTitle({ bold })} label="Bold" />
+          </>
+        ) : (
+          <p className="insp-hint">No title. Use + to add text beside the logo, shown on every page.</p>
+        )}
       </Group>
 
       <Group
@@ -492,8 +561,8 @@ function FieldsPanel({ block: b, set }: { block: FieldsBlock; set(patch: Partial
         </Field>
       </div>
       <p className="insp-hint">
-        Point at a row and use its &#8943; button to make the label bold, link the value to the quotation number or
-        date, reorder it, or remove it.
+        Point at a row and use its &#8943; button to make the label bold, print the row in grey, link the value to
+        the quotation number or date, reorder it, or remove it.
       </p>
     </>
   )
@@ -512,6 +581,10 @@ function ItemsPanel({ block: b, set }: { block: ItemsBlock; set(patch: Partial<I
       <p className="insp-hint">
         Total = the sum of Qty &times; Amount for every row. A row with no Qty counts as 1. Press Enter in a
         description to add a row below it.
+      </p>
+      <p className="insp-hint">
+        For a row that needs no quantity, point at it and use its &#8943; button to remove the quantity cell. Its
+        amount can stay empty; if one is typed, it is added to the total as it is.
       </p>
     </>
   )

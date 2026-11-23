@@ -64,6 +64,7 @@
   right: 0;
   display: flex;
   justify-content: center;
+  color: #3b3838;
   font-weight: 700;
   text-align: center;
 }
@@ -135,6 +136,18 @@
 .hdr-icon {
   flex: none;
   display: block;
+}
+
+/* Line height equals the font's own, so `top` is exactly the top of the letters' line box. */
+.hdr-title {
+  position: absolute;
+  line-height: 1.26;
+  white-space: nowrap;
+}
+
+.hdr-title .et {
+  min-height: 1.26em;
+  white-space: pre;
 }
 
 .hdr-icon img {

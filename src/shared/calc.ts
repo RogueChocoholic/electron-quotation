@@ -21,6 +21,9 @@ export const LIST_INDENT = 12.7
 export const LIST_HANGING = 6.35
 export const ACCOUNT_LABEL_W = 25.4
 export const CAPTION_PT = 9
+/** Grey used for detail rows marked as secondary. */
+export const MUTED_COLOR = '#767171'
+export const FOOTER_COLOR = '#3b3838'
 
 export function uid(): string {
   return Math.random().toString(36).slice(2, 10) + Date.now().toString(36).slice(-4)
@@ -32,11 +35,14 @@ export function parseNum(s: string): number {
   return m ? Number(m[0]) : NaN
 }
 
-/** Quantity x unit price. A blank quantity counts as 1; a blank or unreadable price counts as 0. */
+/**
+ * Quantity x unit price. A blank quantity counts as 1; a blank or unreadable price counts as 0.
+ * A row without a quantity cell adds its amount as typed, so it adds nothing when left empty.
+ */
 export function rowAmount(row: ItemRow): number {
   const price = parseNum(row.price)
   if (Number.isNaN(price)) return 0
-  if (row.qty.trim() === '') return price
+  if (!row.hasQty || row.qty.trim() === '') return price
   const qty = parseNum(row.qty)
   return Number.isNaN(qty) ? 0 : qty * price
 }

@@ -52,6 +52,11 @@ try {
   await page.waitForTimeout(800)
   await shot('05-editor')
   check((await page.locator('.page').count()) === 1, 'default quotation fits on one page')
+  check((await page.locator('.hdr-title').innerText()).trim() === 'QUOTATION', 'title is shown in the header')
+  const greyRows = await page
+    .locator('.field-row')
+    .evaluateAll((rows) => rows.filter((r) => getComputedStyle(r).color === 'rgb(118, 113, 113)').length)
+  check(greyRows === 3, `event details are grey (${greyRows} rows)`)
 
   // Type prices so the total is exercised: 8 rows, qty 1 except the first which is 2.
   const prices = page.locator('.items td.amount .et')
@@ -68,6 +73,27 @@ try {
   const total = (await page.locator('.items .total-value').innerText()).trim()
   const expected = count * (count + 1) * 500 + 1000
   check(Number(total.replace(/[^0-9.]/g, '')) === expected, `total is ${expected} (shown: ${total})`)
+  // A row can do without its quantity cell, and its amount can then stay empty.
+  const itemRows = page.locator('.items tbody tr[data-items-row]')
+  const shownTotal = async () => Number((await page.locator('.items .total-value').innerText()).replace(/[^0-9.]/g, ''))
+  const toggleQtyCell = async (index) => {
+    await itemRows.nth(index).hover()
+    await itemRows.nth(index).locator('.row-opt').click()
+    await page.locator('.menu-item', { hasText: 'No quantity cell' }).click()
+    await page.waitForTimeout(150)
+  }
+  await toggleQtyCell(1)
+  check((await itemRows.nth(1).locator('td').count()) === 2, 'a row can have its quantity cell removed')
+  check((await itemRows.nth(2).locator('td').count()) === 3, 'other rows keep their quantity cell')
+  await itemRows.nth(1).locator('td.amount .et').click()
+  await page.keyboard.press('Control+A')
+  await page.keyboard.press('Backspace')
+  await page.locator('.canvas').click({ position: { x: 5, y: 5 } })
+  check((await shownTotal()) === expected - 2000, `a row with no quantity and no amount adds nothing (total ${await shownTotal()})`)
+  await toggleQtyCell(0)
+  check((await shownTotal()) === expected - 3000, `an amount typed in a row with no quantity counts once (total ${await shownTotal()})`)
+  await toggleQtyCell(0)
+  check((await shownTotal()) === expected - 2000, 'putting the quantity cell back restores the quantity')
   await page.waitForTimeout(900)
   await shot('06-editor-filled')
 
@@ -118,6 +144,7 @@ try {
   const pageCount = await page.locator('.page').count()
   check(pageCount === 2, `long content flows to a second page (pages: ${pageCount})`)
   check((await page.locator('.page .hdr').count()) === pageCount, 'header repeats on every page')
+  check((await page.locator('.page .hdr-title').count()) === pageCount, 'header title repeats on every page')
   check((await page.locator('.items thead').count()) >= 1, 'items table is still present')
   await page.locator('.canvas').evaluate((el) => (el.scrollTop = el.scrollHeight))
   await shot('08-two-pages')
