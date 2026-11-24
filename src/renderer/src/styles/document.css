@@ -222,6 +222,15 @@
   min-height: 1.45em;
 }
 
+/* A bold lead-in ("Specification:") that runs on into the text on the same line. */
+.text-block.has-lead > .et {
+  display: inline;
+}
+
+.text-block > .text-lead {
+  font-weight: 700;
+}
+
 /* fields */
 
 .fields {
@@ -294,6 +303,15 @@
   border-left: none;
   font-weight: 700;
   text-align: right;
+}
+
+/* Further rows under the first stand outside the grid as well. */
+.items .total-label.is-below {
+  border-top: none;
+}
+
+.items .total-label.is-boxed {
+  border: 0.5pt solid #000;
 }
 
 .items .total-value {

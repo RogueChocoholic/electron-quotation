@@ -1,12 +1,15 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
+import { DOC_WORDS } from '@shared/calc'
 import type { DocMeta } from '@shared/types'
 import { createBlankTemplate, duplicateTemplate } from '../app/actions'
 import { errorText, formatWhen, useApp } from '../app/context'
 import { IconMore, IconPlus, IconTemplate, IconUpload } from '../ui/icons'
 import { Button, IconButton, useConfirm, useMenu, useToast } from '../ui/ui'
 
+/** The templates for quotations or for invoices, whichever the app is switched to. */
 export function TemplatesView() {
-  const { navigate, newQuotation, settings } = useApp()
+  const { navigate, newDocument, settings, mode, setMode } = useApp()
+  const words = DOC_WORDS[mode]
   const toast = useToast()
   const confirm = useConfirm()
   const openMenu = useMenu()
@@ -25,7 +28,10 @@ export function TemplatesView() {
     void reload()
   }, [reload])
 
-  const templates = useMemo(() => (metas ?? []).filter((m) => m.kind === 'template'), [metas])
+  const templates = useMemo(
+    () => (metas ?? []).filter((m) => m.kind === 'template' && m.docType === mode),
+    [metas, mode]
+  )
   const edit = (id: string): void => navigate({ name: 'editor', id, from: 'templates' })
 
   /** Runs an action and reports a failure instead of leaving the button silently doing nothing. */
@@ -44,7 +50,10 @@ export function TemplatesView() {
       const count = result.ids?.length ?? 0
       if (count > 0) toast({ kind: 'success', message: count === 1 ? 'Template imported.' : `${count} templates imported.` })
       if (result.error) toast({ kind: 'error', message: result.error })
-      await reload()
+      // A file can hold a template of the other type; go to where what was imported is listed.
+      const imported = (await window.api.docs.list()).filter((m) => result.ids?.includes(m.id))
+      if (imported.length > 0 && imported.every((m) => m.docType !== mode)) setMode(imported[0].docType)
+      else await reload()
     })
 
   const exportTemplate = (m: DocMeta): Promise<void> =>
@@ -68,8 +77,8 @@ export function TemplatesView() {
       title: 'Delete template',
       body: (
         <>
-          Delete the template <strong>{m.name || 'Untitled template'}</strong>? Quotations already made from it are not
-          affected. This cannot be undone.
+          Delete the template <strong>{m.name || 'Untitled template'}</strong>? {words.Many} already made from it are
+          not affected. This cannot be undone.
         </>
       ),
       confirmLabel: 'Delete',
@@ -87,11 +96,11 @@ export function TemplatesView() {
     openMenu(anchor, [
       {
         label: 'Copy of the built-in design',
-        onSelect: () => void run(async () => edit((await window.api.docs.createDefaultTemplate()).id))
+        onSelect: () => void run(async () => edit((await window.api.docs.createDefaultTemplate(mode)).id))
       },
       {
         label: 'Blank template',
-        onSelect: () => void run(async () => edit((await createBlankTemplate(settings.defaultAccountId)).id))
+        onSelect: () => void run(async () => edit((await createBlankTemplate(settings.defaultAccountId, mode)).id))
       }
     ])
 
@@ -99,8 +108,8 @@ export function TemplatesView() {
     <div className="view">
       <header className="view-head">
         <div>
-          <h1>Templates</h1>
-          <p className="view-sub">A template holds the design and the default text for new quotations.</p>
+          <h1>{words.One} templates</h1>
+          <p className="view-sub">A template holds the design and the default text for new {words.many}.</p>
         </div>
         <div className="view-actions">
           <Button icon={<IconUpload />} onClick={() => void importTemplates()}>
@@ -117,7 +126,7 @@ export function TemplatesView() {
           <div className="empty-icon">
             <IconTemplate />
           </div>
-          <h2>No templates</h2>
+          <h2>No {words.one} templates</h2>
           <p>Start from the built-in design, a blank page, or import a template file from another PC.</p>
           <Button variant="primary" icon={<IconPlus />} onClick={(e) => addMenu(e.currentTarget)}>
             New template
@@ -136,8 +145,8 @@ export function TemplatesView() {
               <span className="card-sub">Edited {formatWhen(m.updatedAt)}</span>
             </button>
             <div className="card-foot">
-              <Button small onClick={() => newQuotation({ templateId: m.id })}>
-                New quotation
+              <Button small onClick={() => newDocument({ templateId: m.id })}>
+                New {words.one}
               </Button>
               <Button small variant="ghost" onClick={() => edit(m.id)}>
                 Edit

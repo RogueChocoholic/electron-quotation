@@ -1,5 +1,5 @@
 // End-to-end check of the built app: starts it with a throwaway data folder, creates a
-// quotation from the default template, and exports it to PDF and Word.
+// quotation and an invoice from the built-in templates, and exports them to PDF and Word.
 // Run with: npm run smoke   (output goes to .smoke/)
 import fs from 'node:fs'
 import path from 'node:path'
@@ -29,21 +29,25 @@ try {
   })
   await page.setViewportSize({ width: 1440, height: 900 }).catch(() => undefined)
   const shot = (name) => page.screenshot({ path: path.join(outDir, `${name}.png`) })
+  /** A sidebar entry, and one side of the quotations / invoices switch above them. */
+  const nav = (label) => page.locator('.nav-item', { hasText: label })
+  const mode = (label) => page.locator('.mode-switch button', { hasText: label })
 
   await page.getByRole('heading', { name: 'Quotations', exact: true }).waitFor()
   const info = await page.evaluate(() => window.api.app.info())
   check(path.resolve(info.dataPath).startsWith(dataDir), `data folder is isolated (${info.dataPath})`)
   await shot('01-quotations-empty')
 
-  await page.getByRole('button', { name: 'Templates' }).click()
+  await nav('Templates').click()
   await page.getByText('Mobile Washroom Quotation').waitFor()
+  check((await page.locator('.card').count()) === 1, 'quotation templates list only quotation templates')
   await shot('02-templates')
 
-  await page.getByRole('button', { name: 'Settings' }).click()
+  await nav('Settings').click()
   await page.getByRole('heading', { name: 'Settings', exact: true }).waitFor()
   await shot('03-settings')
 
-  await page.getByRole('button', { name: 'Quotations' }).click()
+  await nav('Quotations').click()
   await page.getByRole('button', { name: 'New quotation' }).first().click()
   await page.getByRole('dialog').waitFor()
   await shot('04-new-quotation')
@@ -160,7 +164,7 @@ try {
   check(fs.existsSync(twoPagesDocx), 'two-page Word document exported')
 
   // The quotation is listed and reopens with its content.
-  await page.getByRole('button', { name: 'Quotations' }).click()
+  await page.getByRole('button', { name: 'Quotations', exact: true }).click()
   const listRow = page.locator('.list-table tbody tr').first()
   await listRow.waitFor()
   await shot('09-quotations')
@@ -170,7 +174,7 @@ try {
   await page.waitForTimeout(600)
   const reopened = await page.locator('.items tbody tr[data-items-row]').count()
   check(reopened === count + 22, `reopened quotation kept its rows (${reopened} of ${count + 22})`)
-  await page.getByRole('button', { name: 'Quotations' }).click()
+  await page.getByRole('button', { name: 'Quotations', exact: true }).click()
 
   // With number generation off, a number has to be typed.
   await page.getByRole('button', { name: 'New quotation' }).first().click()
@@ -185,8 +189,95 @@ try {
   await shot('10-manual-number')
   await dialogEl.getByRole('button', { name: 'Cancel' }).click()
 
+  // ------------------------------------------------------------------ invoices
+  // The switch in the sidebar turns the whole app over to invoices.
+  await mode('Invoices').click()
+  await page.getByRole('heading', { name: 'Invoices', exact: true }).waitFor()
+  check((await page.locator('.list-table tbody tr').count()) === 0, 'the invoice list does not show quotations')
+  await shot('13-invoices-empty')
+  await nav('Templates').click()
+  await page.getByText('Mobile Washroom Invoice').waitFor()
+  check((await page.locator('.card').count()) === 1, 'invoice templates list only invoice templates')
+  await shot('14-invoice-templates')
+
+  await nav('Invoices').click()
+  await page.getByRole('button', { name: 'New invoice' }).first().click()
+  await dialogEl.waitFor()
+  const invoiceNumber = await dialogEl.locator('input.input').last().inputValue()
+  check(/^INV-\d{2}0001$/.test(invoiceNumber), `invoices are numbered in their own series (${invoiceNumber})`)
+  check((await dialogEl.getByText('Bank account').count()) === 0, 'no bank account is asked for a design without one')
+  await shot('15-new-invoice')
+  await dialogEl.getByRole('button', { name: 'Create' }).click()
+  await page.locator('.page').first().waitFor()
+  await page.waitForTimeout(800)
+  check((await page.locator('.hdr-title').innerText()).trim() === 'INVOICE', 'invoice title is shown in the header')
+  check((await page.locator('.items thead th').count()) === 2, 'the invoice table has no quantity column')
+  check((await page.locator('.items .row-opt').count()) === 0, 'rows offer no quantity option without the column')
+
+  // Filled in with the content of the reference invoice.
+  const typeInto = async (locator, text) => {
+    await locator.click()
+    await page.keyboard.press('Control+End')
+    const lines = text.split('\n')
+    for (const [i, line] of lines.entries()) {
+      if (i > 0) await page.keyboard.press('Enter')
+      await page.keyboard.type(line)
+    }
+  }
+  await typeInto(page.locator('.field-row').first().locator('.field-value .et'), 'Mr. W M S Lakshitha-Engineer')
+  await typeInto(page.locator('.blk').nth(1).locator('.et'), '\n126C/1/1,\nHigh Level Road,\nNugegoda,\nSri Lanka.')
+  await typeInto(
+    page.locator('.text-block.has-lead .et').nth(1),
+    "Advane payment for Six fully equipped mobile toilet unit's rental basis at the Ingiriya Location from 01 December 2026."
+  )
+  const invoiceRow = page.locator('.items tbody tr[data-items-row]').first()
+  await typeInto(invoiceRow.locator('td .et').first(), 'Total quotation for Two fully equipped mobile toilet units')
+  await typeInto(invoiceRow.locator('td.amount .et'), '185000')
+  await typeInto(page.locator('.items tr[data-summary="paid"] .total-value .et'), '92500')
+  await page.locator('.canvas').click({ position: { x: 5, y: 5 } })
+  await page.waitForTimeout(400)
+  const cellText = async (selector) => (await page.locator(selector).innerText()).trim()
+  check((await cellText('.items td.amount .et')) === '185,000.00', 'invoice amounts always show cents')
+  check((await cellText('.items tr[data-summary="paid"] .total-value')) === '92,500.00', 'the amount paid is shown')
+  check(
+    (await cellText('.items tr[data-summary="balance"] .total-value')) === '92,500.00',
+    'balance = total - amount paid'
+  )
+  check((await page.locator('.items tr[data-summary="total"]').count()) === 0, 'the invoice has no separate total row')
+  check(
+    (await page.getByText('Advance payment received (92,500.00)').count()) === 1,
+    'text shows the amount paid through {paid}'
+  )
+  check((await page.locator('.page').count()) === 1, 'the invoice fits on one page')
+  await page.waitForTimeout(900)
+  await shot('16-invoice-editor')
+  for (const ext of ['pdf', 'docx']) {
+    const target = path.join(outDir, `invoice.${ext}`)
+    await stubSave(target)
+    await page.getByRole('button', { name: ext === 'pdf' ? 'PDF' : 'Word', exact: true }).click()
+    await waitForFile(target)
+    check(fs.existsSync(target) && fs.statSync(target).size > 10000, `invoice ${ext} exported`)
+  }
+
+  await page.getByRole('button', { name: 'Invoices', exact: true }).click()
+  await page.locator('.list-table tbody tr').first().waitFor()
+  const invoiceRows = await page.locator('.list-table tbody tr').allInnerTexts()
+  check(invoiceRows.length === 1 && invoiceRows[0].includes('INV-'), 'the invoice is listed under Invoices')
+  check(invoiceRows[0].includes('Lakshitha') && invoiceRows[0].includes('185,000.00'), 'with its customer and total')
+  await shot('17-invoices')
+  await mode('Quotations').click()
+  await page.getByRole('heading', { name: 'Quotations', exact: true }).waitFor()
+  await page.locator('.list-table tbody tr').first().waitFor()
+  const quotationRows = await page.locator('.list-table tbody tr').allInnerTexts()
+  check(quotationRows.length === 1 && quotationRows[0].includes('MT-'), 'quotations are not mixed with invoices')
+  const counters = await page.evaluate(async () => {
+    const s = await window.api.settings.get()
+    return [s.numbering.nextSeq, s.invoiceNumbering.nextSeq]
+  })
+  check(counters[0] === 19 && counters[1] === 2, `each series kept its own counter (${counters.join(', ')})`)
+
   // A template survives an export / import round trip.
-  await page.getByRole('button', { name: 'Templates' }).click()
+  await nav('Templates').click()
   await page.locator('.card').first().waitFor()
   const bundle = path.join(outDir, 'template.qtpl')
   await stubSave(bundle)
@@ -218,6 +309,10 @@ try {
   try {
     const p2 = await again.firstWindow()
     await p2.getByRole('heading', { name: 'Quotations', exact: true }).waitFor()
+    check(
+      (await p2.evaluate(async () => (await window.api.docs.list()).filter((m) => m.kind === 'document').length)) === 2,
+      'the quotation and the invoice are both still stored'
+    )
     const footers = await p2.evaluate(async () => {
       const metas = await window.api.docs.list()
       const docs = await Promise.all(metas.filter((m) => m.kind === 'template').map((m) => window.api.docs.get(m.id)))

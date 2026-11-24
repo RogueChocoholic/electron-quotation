@@ -1,6 +1,6 @@
 import { useState } from 'react'
-import { peekNumber, uid } from '@shared/calc'
-import type { Account, Numbering, UpdateStatus } from '@shared/types'
+import { DOC_WORDS, numberingOf, peekNumber, uid, withNumbering } from '@shared/calc'
+import type { Account, DocType, Numbering, UpdateStatus } from '@shared/types'
 import { formatWhen, useApp } from '../app/context'
 import { IconBank, IconFolder, IconPlus, IconRefresh } from '../ui/icons'
 import { Button, Field, Modal, NumberInput, TextInput, Toggle, useConfirm } from '../ui/ui'
@@ -78,15 +78,86 @@ function AccountDialog({
   )
 }
 
+/** How quotations, or invoices, are numbered. Each has a series of its own. */
+function NumberingSection({ docType }: { docType: DocType }) {
+  const { settings, saveSettings } = useApp()
+  const words = DOC_WORDS[docType]
+  const n = numberingOf(settings, docType)
+  const setNumbering = (patch: Partial<Numbering>): void =>
+    saveSettings(withNumbering(settings, docType, { ...n, ...patch }))
+
+  return (
+    <section className="section">
+      <div className="section-head">
+        <div>
+          <h2>{words.One} numbering</h2>
+          <p>
+            These can also be changed when creating {docType === 'invoice' ? 'an invoice' : 'a quotation'}.
+            {docType === 'invoice' && ' Invoices are counted separately from quotations.'}
+          </p>
+        </div>
+      </div>
+      <div className="panel form">
+        <Toggle
+          checked={n.auto}
+          onChange={(auto) => setNumbering({ auto })}
+          label={`Generate ${words.one} numbers automatically`}
+          hint={
+            n.auto
+              ? `A new ${words.one} gets the next number. You can still change it by hand.`
+              : `Off: a number must be typed for every new ${words.one}.`
+          }
+        />
+        {n.auto && (
+          <>
+            <div className="form-row">
+              <Field label="Prefix">
+                <TextInput value={n.prefix} maxLength={24} onChange={(prefix) => setNumbering({ prefix })} />
+              </Field>
+              <Field label="Digits in the counter">
+                <NumberInput
+                  value={n.digits}
+                  min={1}
+                  max={12}
+                  onChange={(digits) => setNumbering({ digits: Math.round(digits) })}
+                />
+              </Field>
+              <Field label="Next counter value">
+                <NumberInput
+                  value={peekNumber(n).seq}
+                  min={1}
+                  max={999999999}
+                  onChange={(seq) => setNumbering({ nextSeq: Math.round(seq), seqYear: new Date().getFullYear() })}
+                />
+              </Field>
+            </div>
+            <Toggle
+              checked={n.includeYear}
+              onChange={(includeYear) => setNumbering({ includeYear })}
+              label="Put the 2-digit year after the prefix"
+            />
+            {n.includeYear && (
+              <Toggle
+                checked={n.yearlyReset}
+                onChange={(yearlyReset) => setNumbering({ yearlyReset })}
+                label="Restart the counter at 1 each year"
+              />
+            )}
+            <div className="callout">
+              The next {words.one} will be numbered <strong>{peekNumber(n).number}</strong>
+            </div>
+          </>
+        )}
+      </div>
+    </section>
+  )
+}
+
 export function SettingsView() {
   const { settings, saveSettings, info, update } = useApp()
   const confirm = useConfirm()
   const [editing, setEditing] = useState<Account | null>(null)
   const [checking, setChecking] = useState(false)
-
-  const n = settings.numbering
-  const setNumbering = (patch: Partial<Numbering>): void =>
-    saveSettings({ ...settings, numbering: { ...settings.numbering, ...patch } })
 
   const saveAccount = (account: Account): void => {
     const exists = settings.accounts.some((a) => a.id === account.id)
@@ -102,8 +173,8 @@ export function SettingsView() {
       title: 'Delete bank account',
       body: (
         <>
-          Delete <strong>{account.name}</strong>? Quotations and templates that use it will show no bank details until
-          another account is chosen.
+          Delete <strong>{account.name}</strong>? Quotations, invoices and templates that use it will show no bank
+          details until another account is chosen.
         </>
       ),
       confirmLabel: 'Delete',
@@ -143,8 +214,8 @@ export function SettingsView() {
           <div>
             <h2>Bank accounts</h2>
             <p>
-              Account details are entered once here. On a quotation you only choose which account to show; the details
-              cannot be typed over on the page.
+              Account details are entered once here. On a quotation or invoice you only choose which account to show;
+              the details cannot be typed over on the page.
             </p>
           </div>
           <Button
@@ -187,66 +258,8 @@ export function SettingsView() {
         )}
       </section>
 
-      <section className="section">
-        <div className="section-head">
-          <div>
-            <h2>Quotation numbering</h2>
-            <p>These can also be changed when creating a quotation.</p>
-          </div>
-        </div>
-        <div className="panel form">
-          <Toggle
-            checked={n.auto}
-            onChange={(auto) => setNumbering({ auto })}
-            label="Generate quotation numbers automatically"
-            hint={
-              n.auto
-                ? 'A new quotation gets the next number. You can still change it by hand.'
-                : 'Off: a number must be typed for every new quotation.'
-            }
-          />
-          {n.auto && (
-            <>
-              <div className="form-row">
-                <Field label="Prefix">
-                  <TextInput value={n.prefix} maxLength={24} onChange={(prefix) => setNumbering({ prefix })} />
-                </Field>
-                <Field label="Digits in the counter">
-                  <NumberInput
-                    value={n.digits}
-                    min={1}
-                    max={12}
-                    onChange={(digits) => setNumbering({ digits: Math.round(digits) })}
-                  />
-                </Field>
-                <Field label="Next counter value">
-                  <NumberInput
-                    value={peekNumber(n).seq}
-                    min={1}
-                    max={999999999}
-                    onChange={(seq) => setNumbering({ nextSeq: Math.round(seq), seqYear: new Date().getFullYear() })}
-                  />
-                </Field>
-              </div>
-              <Toggle
-                checked={n.includeYear}
-                onChange={(includeYear) => setNumbering({ includeYear })}
-                label="Put the 2-digit year after the prefix"
-              />
-              {n.includeYear && (
-                <Toggle
-                  checked={n.yearlyReset}
-                  onChange={(yearlyReset) => setNumbering({ yearlyReset })}
-                  label="Restart the counter at 1 each year"
-                />
-              )}
-              <div className="callout">
-                The next quotation will be numbered <strong>{peekNumber(n).number}</strong>
-              </div>
-            </>
-          )}
-        </div>
-      </section>
+      <NumberingSection docType="quotation" />
+      <NumberingSection docType="invoice" />
 
       <section className="section">
         <div className="section-head">
@@ -284,7 +297,7 @@ export function SettingsView() {
         <div className="section-head">
           <div>
             <h2>Data</h2>
-            <p>Quotations, templates, images and settings are stored on this PC and are kept when the app updates.</p>
+            <p>Quotations, invoices, templates, images and settings are stored on this PC and are kept when the app updates.</p>
           </div>
         </div>
         <div className="panel rows">

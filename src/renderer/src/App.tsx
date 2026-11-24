@@ -1,19 +1,20 @@
 import { useCallback, useEffect, useMemo, useState, type ReactNode } from 'react'
-import type { AppInfo, Settings, UpdateStatus } from '@shared/types'
-import { AppContext, useApp, type AppContextValue, type NewQuotationRequest, type Route } from './app/context'
-import { NewQuotationDialog } from './app/NewQuotationDialog'
+import { DOC_WORDS } from '@shared/calc'
+import type { AppInfo, DocType, Settings, UpdateStatus } from '@shared/types'
+import { AppContext, useApp, type AppContextValue, type NewDocumentRequest, type Route } from './app/context'
+import { NewDocumentDialog } from './app/NewDocumentDialog'
 import { loadDocFonts } from './doc/DocumentView'
 import { cx } from './doc/util'
 import { IconDoc, IconSettings, IconTemplate } from './ui/icons'
-import { UiProvider } from './ui/ui'
+import { Segmented, UiProvider } from './ui/ui'
+import { DocumentsView } from './views/DocumentsView'
 import { EditorView } from './views/EditorView'
-import { QuotationsView } from './views/QuotationsView'
 import { SettingsView } from './views/SettingsView'
 import { TemplatesView } from './views/TemplatesView'
 
 function Sidebar() {
-  const { route, navigate, info, update } = useApp()
-  const item = (name: 'quotations' | 'templates' | 'settings', label: string, icon: ReactNode) => (
+  const { route, navigate, info, update, mode, setMode } = useApp()
+  const item = (name: 'documents' | 'templates' | 'settings', label: string, icon: ReactNode) => (
     <button
       type="button"
       className={cx('nav-item', route.name === name && 'is-active')}
@@ -29,8 +30,19 @@ function Sidebar() {
         <span className="brand-mark">Q</span>
         <span className="brand-name">Quotation Maker</span>
       </div>
+      {/* Everything below follows this switch: the list, the templates and what "New" creates. */}
+      <div className="mode-switch" title="Switch between quotations and invoices">
+        <Segmented<DocType>
+          value={mode}
+          onChange={setMode}
+          options={[
+            { value: 'quotation', label: DOC_WORDS.quotation.Many },
+            { value: 'invoice', label: DOC_WORDS.invoice.Many }
+          ]}
+        />
+      </div>
       <nav className="nav">
-        {item('quotations', 'Quotations', <IconDoc />)}
+        {item('documents', DOC_WORDS[mode].Many, <IconDoc />)}
         {item('templates', 'Templates', <IconTemplate />)}
         {item('settings', 'Settings', <IconSettings />)}
       </nav>
@@ -54,8 +66,8 @@ export function App() {
   const [settings, setSettings] = useState<Settings | null>(null)
   const [info, setInfo] = useState<AppInfo | null>(null)
   const [update, setUpdate] = useState<UpdateStatus>({ state: 'idle' })
-  const [route, setRoute] = useState<Route>({ name: 'quotations' })
-  const [request, setRequest] = useState<NewQuotationRequest | null>(null)
+  const [route, setRoute] = useState<Route>({ name: 'documents' })
+  const [request, setRequest] = useState<NewDocumentRequest | null>(null)
 
   useEffect(() => {
     void window.api.settings.get().then(setSettings)
@@ -70,11 +82,29 @@ export function App() {
     void window.api.settings.save(next)
   }, [])
 
-  const newQuotation = useCallback((req: NewQuotationRequest = {}) => setRequest(req), [])
+  const newDocument = useCallback((req: NewDocumentRequest = {}) => setRequest(req), [])
+
+  const setMode = useCallback(
+    (mode: DocType) => {
+      if (settings && settings.mode !== mode) saveSettings({ ...settings, mode })
+    },
+    [settings, saveSettings]
+  )
 
   const value = useMemo<AppContextValue | null>(
-    () => settings && { settings, saveSettings, info, update, route, navigate: setRoute, newQuotation },
-    [settings, saveSettings, info, update, route, newQuotation]
+    () =>
+      settings && {
+        settings,
+        saveSettings,
+        info,
+        update,
+        route,
+        navigate: setRoute,
+        mode: settings.mode,
+        setMode,
+        newDocument
+      },
+    [settings, saveSettings, info, update, route, setMode, newDocument]
   )
 
   if (!value) return <div className="boot" />
@@ -85,19 +115,20 @@ export function App() {
         <div className="app">
           {route.name !== 'editor' && <Sidebar />}
           <main className="main">
-            {route.name === 'quotations' && <QuotationsView />}
-            {route.name === 'templates' && <TemplatesView />}
+            {/* Keyed by the mode so that switching starts each list afresh. */}
+            {route.name === 'documents' && <DocumentsView key={value.mode} />}
+            {route.name === 'templates' && <TemplatesView key={value.mode} />}
             {route.name === 'settings' && <SettingsView />}
             {route.name === 'editor' && <EditorView key={route.id} id={route.id} from={route.from} />}
           </main>
         </div>
         {request && (
-          <NewQuotationDialog
+          <NewDocumentDialog
             request={request}
             onClose={() => setRequest(null)}
             onCreated={(doc) => {
               setRequest(null)
-              setRoute({ name: 'editor', id: doc.id, from: 'quotations' })
+              setRoute({ name: 'editor', id: doc.id, from: 'documents' })
             }}
           />
         )}

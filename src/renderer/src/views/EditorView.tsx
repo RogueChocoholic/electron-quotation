@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { customerOf } from '@shared/calc'
+import { DOC_WORDS, customerOf } from '@shared/calc'
 import type { QDoc } from '@shared/types'
 import { saveAsTemplate } from '../app/actions'
 import { errorText, useApp } from '../app/context'
@@ -17,8 +17,8 @@ const PAGE_WIDTH_PX = 210 * PX_PER_MM
 
 type SaveState = 'saved' | 'saving' | 'error'
 
-export function EditorView({ id, from }: { id: string; from: 'quotations' | 'templates' }) {
-  const { settings, navigate, newQuotation } = useApp()
+export function EditorView({ id, from }: { id: string; from: 'documents' | 'templates' }) {
+  const { settings, navigate, newDocument, mode, setMode } = useApp()
   const toast = useToast()
   const openMenu = useMenu()
 
@@ -51,8 +51,11 @@ export function EditorView({ id, from }: { id: string; from: 'quotations' | 'tem
         }
         docRef.current = loaded
         setDoc(loaded)
+        // A number only clashes with another document of the same type.
         setOtherNumbers(
-          list.filter((m) => m.kind === 'quotation' && m.id !== id && m.number.trim()).map((m) => m.number.trim())
+          list
+            .filter((m) => m.kind === 'document' && m.docType === loaded.docType && m.id !== id && m.number.trim())
+            .map((m) => m.number.trim())
         )
         // Start zoomed so the whole page width is visible.
         const width = canvasRef.current?.clientWidth ?? 0
@@ -189,13 +192,19 @@ export function EditorView({ id, from }: { id: string; from: 'quotations' | 'tem
     }
   }, [])
 
-  const back = (): void => navigate({ name: from })
+  const words = DOC_WORDS[doc?.docType ?? mode]
+
+  /** Goes back to the list this document is in, switching the app to its type if need be. */
+  const back = (): void => {
+    if (doc && doc.docType !== mode) setMode(doc.docType)
+    navigate({ name: from })
+  }
 
   const exportAs = async (kind: 'pdf' | 'docx'): Promise<void> => {
     const current = docRef.current
     if (!current || exporting) return
-    if (current.kind === 'quotation' && current.number.trim() === '') {
-      toast({ kind: 'error', message: 'Enter a quotation number before exporting.' })
+    if (current.kind === 'document' && current.number.trim() === '') {
+      toast({ kind: 'error', message: `Enter ${current.docType === 'invoice' ? 'an invoice' : 'a quotation'} number before exporting.` })
       setTab('document')
       window.setTimeout(() => document.getElementById('insp-number')?.focus(), 50)
       return
@@ -236,7 +245,7 @@ export function EditorView({ id, from }: { id: string; from: 'quotations' | 'tem
   const moreMenu = (anchor: Element): void => {
     const current = docRef.current
     if (!current) return
-    if (current.kind === 'quotation') {
+    if (current.kind === 'document') {
       openMenu(anchor, [
         {
           label: 'Save as a new template',
@@ -261,8 +270,8 @@ export function EditorView({ id, from }: { id: string; from: 'quotations' | 'tem
     } else {
       openMenu(anchor, [
         {
-          label: 'New quotation from this template',
-          onSelect: () => void flush().then(() => newQuotation({ templateId: current.id }))
+          label: `New ${DOC_WORDS[current.docType].one} from this template`,
+          onSelect: () => void flush().then(() => newDocument({ docType: current.docType, templateId: current.id }))
         },
         {
           label: 'Export template to file',
@@ -309,10 +318,10 @@ export function EditorView({ id, from }: { id: string; from: 'quotations' | 'tem
     <div className="editor">
       <header className="editor-bar">
         <Button variant="ghost" icon={<IconChevronLeft />} onClick={back}>
-          {from === 'templates' ? 'Templates' : 'Quotations'}
+          {from === 'templates' ? 'Templates' : words.Many}
         </Button>
         <div className="editor-title">
-          <span className="editor-kind">{doc?.kind === 'template' ? 'Template' : 'Quotation'}</span>
+          <span className="editor-kind">{doc?.kind === 'template' ? `${words.One} template` : words.One}</span>
           <span className="editor-name" title={title}>
             {title}
           </span>

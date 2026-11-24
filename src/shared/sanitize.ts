@@ -1,5 +1,5 @@
 import { uid } from './calc'
-import { defaultPage, defaultSettings } from './seed'
+import { ITEMS_DEFAULTS, defaultPage, defaultSettings } from './seed'
 import type {
   Account,
   Align,
@@ -9,6 +9,7 @@ import type {
   FieldRow,
   HeaderConfig,
   HeaderTitle,
+  Numbering,
   PageConfig,
   QDoc,
   Settings
@@ -55,7 +56,9 @@ function block(v: unknown): Block | null {
       return {
         ...base,
         type: 'text',
+        lead: str(b.lead),
         text: str(b.text),
+        indent: num(b.indent, 0, 0, 150),
         size: size(9),
         bold: bool(b.bold),
         color: color(b.color),
@@ -92,7 +95,17 @@ function block(v: unknown): Block | null {
           }
         }),
         hideRowAmounts: bool(b.hideRowAmounts),
-        size: size(9)
+        size: size(9),
+        // Tables saved before these options existed keep their quantity column and total row.
+        showQty: bool(b.showQty, ITEMS_DEFAULTS.showQty),
+        amountWidth: num(b.amountWidth, ITEMS_DEFAULTS.amountWidth, 15, 90),
+        decimals: oneOf(b.decimals, ['auto', 'always'] as const, ITEMS_DEFAULTS.decimals),
+        showTotal: bool(b.showTotal, ITEMS_DEFAULTS.showTotal),
+        boxTotals: bool(b.boxTotals, ITEMS_DEFAULTS.boxTotals),
+        showPayment: bool(b.showPayment, ITEMS_DEFAULTS.showPayment),
+        paidLabel: str(b.paidLabel, ITEMS_DEFAULTS.paidLabel),
+        paid: str(b.paid, ITEMS_DEFAULTS.paid),
+        balanceLabel: str(b.balanceLabel, ITEMS_DEFAULTS.balanceLabel)
       }
     case 'list':
       return {
@@ -190,7 +203,9 @@ export function sanitizeDoc(v: unknown): QDoc | null {
   return {
     schema: 1,
     id: id(d.id),
-    kind: d.kind === 'template' ? 'template' : 'quotation',
+    // Documents saved before invoices existed are quotations, and say so in `kind`.
+    kind: d.kind === 'template' ? 'template' : 'document',
+    docType: d.docType === 'invoice' ? 'invoice' : 'quotation',
     name: str(d.name),
     number: str(d.number),
     date: str(d.date),
@@ -206,10 +221,24 @@ export function sanitizeDoc(v: unknown): QDoc | null {
   }
 }
 
+function numbering(v: unknown, d: Numbering): Numbering {
+  const n = rec(v)
+  return {
+    auto: bool(n.auto, d.auto),
+    prefix: str(n.prefix, d.prefix).slice(0, 24),
+    includeYear: bool(n.includeYear, d.includeYear),
+    yearlyReset: bool(n.yearlyReset, d.yearlyReset),
+    digits: Math.round(num(n.digits, d.digits, 1, 12)),
+    nextSeq: Math.round(num(n.nextSeq, 1, 1, 999999999)),
+    seqYear: Math.round(num(n.seqYear, d.seqYear, 2000, 9999))
+  }
+}
+
+const docId = (v: unknown): string | null => (typeof v === 'string' && ID_RE.test(v) ? v : null)
+
 export function sanitizeSettings(v: unknown): Settings {
   const s = rec(v)
   const d = defaultSettings()
-  const n = rec(s.numbering)
   const accounts: Account[] = arr(s.accounts).map((x) => {
     const a = rec(x)
     return {
@@ -226,17 +255,14 @@ export function sanitizeSettings(v: unknown): Settings {
     schema: 1,
     accounts,
     defaultAccountId: has(s.defaultAccountId) ? s.defaultAccountId : (accounts[0]?.id ?? null),
-    numbering: {
-      auto: bool(n.auto, d.numbering.auto),
-      prefix: str(n.prefix, d.numbering.prefix).slice(0, 24),
-      includeYear: bool(n.includeYear, d.numbering.includeYear),
-      yearlyReset: bool(n.yearlyReset, d.numbering.yearlyReset),
-      digits: Math.round(num(n.digits, d.numbering.digits, 1, 12)),
-      nextSeq: Math.round(num(n.nextSeq, 1, 1, 999999999)),
-      seqYear: Math.round(num(n.seqYear, d.numbering.seqYear, 2000, 9999))
-    },
-    lastTemplateId: typeof s.lastTemplateId === 'string' && ID_RE.test(s.lastTemplateId) ? s.lastTemplateId : null,
+    numbering: numbering(s.numbering, d.numbering),
+    invoiceNumbering: numbering(s.invoiceNumbering, d.invoiceNumbering),
+    lastTemplateId: docId(s.lastTemplateId),
+    lastInvoiceTemplateId: docId(s.lastInvoiceTemplateId),
+    mode: s.mode === 'invoice' ? 'invoice' : 'quotation',
     // Settings written before this field existed belong to the first built-in design.
-    builtinDesign: Math.round(num(s.builtinDesign, 1, 1, 9999))
+    builtinDesign: Math.round(num(s.builtinDesign, 1, 1, 9999)),
+    // Settings written before invoices existed have not been given the invoice template.
+    builtinInvoice: Math.round(num(s.builtinInvoice, 0, 0, 9999))
   }
 }

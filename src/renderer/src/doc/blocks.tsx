@@ -1,15 +1,16 @@
 import { useCallback } from 'react'
 import {
   ACCOUNT_LABEL_W,
-  ITEM_AMOUNT_W,
-  ITEM_QTY_W,
+  DOC_WORDS,
   MUTED_COLOR,
+  PAGE_W,
   accountRows,
-  fmtAmount,
   fmtPrice,
-  itemsTotal,
+  itemsSummary,
+  itemsWidths,
   resolveTokens,
-  uid
+  uid,
+  type SummaryRow
 } from '@shared/calc'
 import type {
   AccountBlock,
@@ -41,17 +42,37 @@ function useMutate<T extends Block>(id: string): (fn: (block: T) => T) => void {
 export function TextBlockView({ block: b }: { block: TextBlock }) {
   const { doc } = useDoc()
   const mutate = useMutate<TextBlock>(b.id)
-  return (
+  const style = {
+    fontSize: pt(b.size),
+    fontWeight: b.bold ? 700 : 400,
+    color: b.color,
+    textAlign: b.align,
+    paddingLeft: b.indent > 0 ? mm(b.indent) : undefined
+  }
+  const text = (className?: string, textAlign = b.align) => (
     <EditableText
       eid={`${b.id}:text`}
       multiline
-      className="text-block"
+      className={className}
       value={b.text}
       display={resolveTokens(b.text, doc)}
-      onChange={(text) => mutate((x) => ({ ...x, text }))}
+      onChange={(value) => mutate((x) => ({ ...x, text: value }))}
       placeholder="Type text"
-      style={{ fontSize: pt(b.size), fontWeight: b.bold ? 700 : 400, color: b.color, textAlign: b.align }}
+      style={className ? style : { textAlign }}
     />
+  )
+  if (b.lead === '') return text('text-block')
+  // The bold lead-in and the text run on as one paragraph, so both are laid out inline.
+  return (
+    <div className="text-block has-lead" style={style}>
+      <EditableText
+        eid={`${b.id}:lead`}
+        className="text-lead"
+        value={b.lead}
+        onChange={(lead) => mutate((x) => ({ ...x, lead }))}
+      />{' '}
+      {text()}
+    </div>
   )
 }
 
@@ -62,6 +83,7 @@ type Side = 'left' | 'right'
 export function FieldsBlockView({ block: b }: { block: FieldsBlock }) {
   const { doc, editable, update, openMenu } = useDoc()
   const mutate = useMutate<FieldsBlock>(b.id)
+  const words = DOC_WORDS[doc.docType]
 
   const setRows = (side: Side, fn: (rows: FieldRow[]) => FieldRow[]): void =>
     mutate((x) => (side === 'left' ? { ...x, left: fn(x.left) } : { ...x, right: fn(x.right) }))
@@ -86,9 +108,9 @@ export function FieldsBlockView({ block: b }: { block: FieldsBlock }) {
       { separator: true },
       { heading: true, label: 'Value shows' },
       bindItem('Typed text', null),
-      bindItem('Quotation number', 'number'),
-      bindItem('Quotation date', 'date'),
-      bindItem('Customer name (listed in Quotations)', 'customer'),
+      bindItem(`${words.One} number`, 'number'),
+      bindItem(`${words.One} date`, 'date'),
+      bindItem(`Customer name (listed in ${words.Many})`, 'customer'),
       { separator: true },
       { label: 'Move up', disabled: index === 0, onSelect: () => setRows(side, (rows) => moveItem(rows, index, -1)) },
       {
@@ -119,7 +141,7 @@ export function FieldsBlockView({ block: b }: { block: FieldsBlock }) {
           const hint =
             r.bind === 'number'
               ? doc.kind === 'template'
-                ? 'Quotation number'
+                ? `${words.One} number`
                 : 'Required'
               : r.bind === 'date'
                 ? 'Date'
@@ -170,9 +192,14 @@ export function FieldsBlockView({ block: b }: { block: FieldsBlock }) {
 // -------------------------------------------------------------------- items
 
 export function ItemsBlockView({ block: b, frag }: { block: ItemsBlock; frag: Fragment }) {
-  const { editable, openMenu } = useDoc()
+  const { doc, editable, openMenu } = useDoc()
   const mutate = useMutate<ItemsBlock>(b.id)
   const [start, end] = frag.rows ?? [0, b.rows.length]
+  const widths = itemsWidths(b, PAGE_W - doc.page.marginLeft - doc.page.marginRight)
+  /** How many columns lie left of the amount column. */
+  const labelSpan = widths.length - 1
+  const summary = frag.showTotal !== false ? itemsSummary(b) : []
+  const isLast = frag.showTotal !== false
 
   const setRow = (id: string, patch: Partial<ItemRow>): void =>
     mutate((x) => ({ ...x, rows: x.rows.map((r) => (r.id === id ? { ...r, ...patch } : r)) }))
@@ -189,125 +216,156 @@ export function ItemsBlockView({ block: b, frag }: { block: ItemsBlock; frag: Fr
     focusEid(`${row.id}:d`)
   }
 
+  const addButton = (className: string) => (
+    <button type="button" className={cx('chrome ghost-add', className)} onClick={() => addRowAfter(null)}>
+      + Add row
+    </button>
+  )
+
+  const SUMMARY: Record<SummaryRow['key'], { eid: string; placeholder: string; set: (x: ItemsBlock, v: string) => ItemsBlock }> = {
+    total: { eid: 'tl', placeholder: 'Total', set: (x, totalLabel) => ({ ...x, totalLabel }) },
+    paid: { eid: 'pl', placeholder: 'Amount paid', set: (x, paidLabel) => ({ ...x, paidLabel }) },
+    balance: { eid: 'bl', placeholder: 'Balance', set: (x, balanceLabel) => ({ ...x, balanceLabel }) }
+  }
+
   return (
-    <table className={cx('items', b.hideRowAmounts && 'amounts-hidden')} style={{ fontSize: pt(b.size) }}>
-      <colgroup>
-        <col />
-        <col style={{ width: mm(ITEM_QTY_W) }} />
-        <col style={{ width: mm(ITEM_AMOUNT_W) }} />
-      </colgroup>
-      <thead>
-        <tr data-items-head={b.id}>
-          <th>
-            <EditableText
-              eid={`${b.id}:hd:${start}`}
-              value={b.descriptionLabel}
-              onChange={(descriptionLabel) => mutate((x) => ({ ...x, descriptionLabel }))}
-              placeholder="Description"
-            />
-          </th>
-          <th className="num">
-            <EditableText
-              eid={`${b.id}:hq:${start}`}
-              value={b.qtyLabel}
-              onChange={(qtyLabel) => mutate((x) => ({ ...x, qtyLabel }))}
-              placeholder="Qty"
-            />
-          </th>
-          <th className="num">
-            <EditableText
-              eid={`${b.id}:ha:${start}`}
-              value={b.amountLabel}
-              onChange={(amountLabel) => mutate((x) => ({ ...x, amountLabel }))}
-              placeholder="Amount"
-            />
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {b.rows.slice(start, end).map((r) => (
-          <tr key={r.id} data-items-row={r.id}>
-            {/* Without a quantity cell the description takes over the quantity column. */}
-            <td colSpan={r.hasQty ? 1 : 2}>
+    <>
+      <table className={cx('items', b.hideRowAmounts && 'amounts-hidden')} style={{ fontSize: pt(b.size) }}>
+        <colgroup>
+          <col />
+          {b.showQty && <col style={{ width: mm(widths[1]) }} />}
+          <col style={{ width: mm(widths[labelSpan]) }} />
+        </colgroup>
+        <thead>
+          <tr data-items-head={b.id}>
+            <th>
               <EditableText
-                eid={`${r.id}:d`}
-                value={r.description}
-                onChange={(description) => setRow(r.id, { description })}
-                onEnter={() => addRowAfter(r.id)}
+                eid={`${b.id}:hd:${start}`}
+                value={b.descriptionLabel}
+                onChange={(descriptionLabel) => mutate((x) => ({ ...x, descriptionLabel }))}
                 placeholder="Description"
               />
-            </td>
-            {r.hasQty && (
-              <td className="num">
+            </th>
+            {b.showQty && (
+              <th className="num">
                 <EditableText
-                  eid={`${r.id}:q`}
-                  value={r.qty}
-                  onChange={(qty) => setRow(r.id, { qty })}
-                  placeholder="1"
+                  eid={`${b.id}:hq:${start}`}
+                  value={b.qtyLabel}
+                  onChange={(qtyLabel) => mutate((x) => ({ ...x, qtyLabel }))}
+                  placeholder="Qty"
+                />
+              </th>
+            )}
+            <th className="num">
+              <EditableText
+                eid={`${b.id}:ha:${start}`}
+                value={b.amountLabel}
+                onChange={(amountLabel) => mutate((x) => ({ ...x, amountLabel }))}
+                placeholder="Amount"
+              />
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {b.rows.slice(start, end).map((r) => {
+            const hasQty = b.showQty && r.hasQty
+            return (
+              <tr key={r.id} data-items-row={r.id}>
+                {/* Without a quantity cell the description takes over the quantity column. */}
+                <td colSpan={hasQty ? 1 : labelSpan}>
+                  <EditableText
+                    eid={`${r.id}:d`}
+                    value={r.description}
+                    onChange={(description) => setRow(r.id, { description })}
+                    onEnter={() => addRowAfter(r.id)}
+                    placeholder="Description"
+                  />
+                </td>
+                {hasQty && (
+                  <td className="num">
+                    <EditableText
+                      eid={`${r.id}:q`}
+                      value={r.qty}
+                      onChange={(qty) => setRow(r.id, { qty })}
+                      placeholder="1"
+                    />
+                  </td>
+                )}
+                <td className="num amount" title={editable && b.hideRowAmounts ? 'Hidden in PDF and Word' : undefined}>
+                  <EditableText
+                    eid={`${r.id}:p`}
+                    value={r.price}
+                    display={!editable && b.hideRowAmounts ? '' : fmtPrice(r.price, b.decimals)}
+                    onChange={(price) => setRow(r.id, { price })}
+                    placeholder={hasQty ? '0' : ''}
+                  />
+                  {editable && (
+                    <>
+                      <button
+                        type="button"
+                        className="chrome row-del"
+                        title="Remove row"
+                        onClick={() => removeRow(r.id)}
+                      >
+                        &times;
+                      </button>
+                      {/* The only row option is about the quantity cell, so it goes when the column does. */}
+                      {b.showQty && (
+                        <button
+                          type="button"
+                          className="chrome row-opt"
+                          title="Row options"
+                          onClick={(e) =>
+                            openMenu(e.currentTarget, [
+                              {
+                                label: 'No quantity cell',
+                                checked: !r.hasQty,
+                                onSelect: () => setRow(r.id, { hasQty: !r.hasQty })
+                              },
+                              { separator: true },
+                              { label: 'Remove row', danger: true, onSelect: () => removeRow(r.id) }
+                            ])
+                          }
+                        >
+                          &#8943;
+                        </button>
+                      )}
+                    </>
+                  )}
+                </td>
+              </tr>
+            )
+          })}
+          {summary.map((row, i) => (
+            <tr key={row.key} data-items-total={b.id} data-summary={row.key}>
+              <td colSpan={labelSpan} className={cx('total-label', b.boxTotals && 'is-boxed', i > 0 && 'is-below')}>
+                {editable && i === 0 && addButton('items-add')}
+                <EditableText
+                  eid={`${b.id}:${SUMMARY[row.key].eid}`}
+                  value={row.label}
+                  onChange={(label) => mutate((x) => SUMMARY[row.key].set(x, label))}
+                  placeholder={SUMMARY[row.key].placeholder}
                 />
               </td>
-            )}
-            <td className="num amount" title={editable && b.hideRowAmounts ? 'Hidden in PDF and Word' : undefined}>
-              <EditableText
-                eid={`${r.id}:p`}
-                value={r.price}
-                display={!editable && b.hideRowAmounts ? '' : fmtPrice(r.price)}
-                onChange={(price) => setRow(r.id, { price })}
-                placeholder={r.hasQty ? '0' : ''}
-              />
-              {editable && (
-                <>
-                  <button
-                    type="button"
-                    className="chrome row-del"
-                    title="Remove row"
-                    onClick={() => removeRow(r.id)}
-                  >
-                    &times;
-                  </button>
-                  <button
-                    type="button"
-                    className="chrome row-opt"
-                    title="Row options"
-                    onClick={(e) =>
-                      openMenu(e.currentTarget, [
-                        {
-                          label: 'No quantity cell',
-                          checked: !r.hasQty,
-                          onSelect: () => setRow(r.id, { hasQty: !r.hasQty })
-                        },
-                        { separator: true },
-                        { label: 'Remove row', danger: true, onSelect: () => removeRow(r.id) }
-                      ])
-                    }
-                  >
-                    &#8943;
-                  </button>
-                </>
-              )}
-            </td>
-          </tr>
-        ))}
-        {frag.showTotal !== false && (
-          <tr data-items-total={b.id}>
-            <td colSpan={2} className="total-label">
-              {editable && (
-                <button type="button" className="chrome ghost-add items-add" onClick={() => addRowAfter(null)}>
-                  + Add row
-                </button>
-              )}
-              <EditableText
-                eid={`${b.id}:tl`}
-                value={b.totalLabel}
-                onChange={(totalLabel) => mutate((x) => ({ ...x, totalLabel }))}
-                placeholder="Total"
-              />
-            </td>
-            <td className="num total-value">{fmtAmount(itemsTotal(b))}</td>
-          </tr>
-        )}
-      </tbody>
-    </table>
+              <td className="num total-value">
+                {row.key === 'paid' ? (
+                  <EditableText
+                    eid={`${b.id}:pv`}
+                    value={b.paid}
+                    display={row.value}
+                    onChange={(paid) => mutate((x) => ({ ...x, paid }))}
+                    placeholder="0"
+                  />
+                ) : (
+                  row.value
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+      {editable && isLast && summary.length === 0 && addButton('items-add-below')}
+    </>
   )
 }
 

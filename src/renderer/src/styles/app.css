@@ -173,6 +173,21 @@ code {
   font-weight: 600;
 }
 
+/* The quotations / invoices switch above the navigation. */
+.mode-switch {
+  padding: 0 4px 10px;
+}
+
+.mode-switch .segmented {
+  height: 30px;
+  background: var(--active);
+}
+
+.mode-switch .segmented button {
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .nav {
   display: flex;
   flex-direction: column;
@@ -1462,6 +1477,14 @@ select.input {
   top: 50%;
   left: 0;
   transform: translateY(-50%);
+}
+
+/* For a table with no total row to hold the button. */
+.items-add-below {
+  position: absolute;
+  top: calc(100% + 2px);
+  left: 0;
+  z-index: 2;
 }
 
 .images-add {

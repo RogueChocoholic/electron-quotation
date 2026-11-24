@@ -1,30 +1,34 @@
 import { useEffect, useMemo, useState } from 'react'
-import { consumeNumber, peekNumber } from '@shared/calc'
+import { DOC_WORDS, consumeNumber, lastTemplateOf, numberingOf, peekNumber, withNumbering } from '@shared/calc'
 import type { DocMeta, QDoc } from '@shared/types'
 import { Button, Field, Modal, Select, TextInput, Toggle, useToast } from '../ui/ui'
-import { createQuotation } from './actions'
-import { errorText, useApp, type NewQuotationRequest } from './context'
+import { createDocument } from './actions'
+import { errorText, useApp, type NewDocumentRequest } from './context'
 
 const NONE = '__none__'
 
 interface Props {
-  request: NewQuotationRequest
+  request: NewDocumentRequest
   onClose(): void
   onCreated(doc: QDoc): void
 }
 
 /**
- * Everything a new quotation needs is decided here: which template (or quotation) it
- * starts from, which bank account it shows, and its number.
+ * Everything a new quotation or invoice needs is decided here: which template (or existing
+ * document) it starts from, which bank account it shows, and its number.
  */
-export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
-  const { settings, saveSettings, navigate } = useApp()
+export function NewDocumentDialog({ request, onClose, onCreated }: Props) {
+  const { settings, saveSettings, navigate, mode, setMode } = useApp()
   const toast = useToast()
+  const docType = request.source?.docType ?? request.docType ?? mode
+  const words = DOC_WORDS[docType]
+  // Quotations and invoices each continue their own series of numbers.
+  const saved = numberingOf(settings, docType)
   const [metas, setMetas] = useState<DocMeta[] | null>(null)
   const [templateId, setTemplateId] = useState<string>('')
   const [accountId, setAccountId] = useState<string>(NONE)
-  const [auto, setAuto] = useState(settings.numbering.auto)
-  const [prefix, setPrefix] = useState(settings.numbering.prefix)
+  const [auto, setAuto] = useState(saved.auto)
+  const [prefix, setPrefix] = useState(saved.prefix)
   const [typed, setTyped] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
 
@@ -36,8 +40,10 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
     void window.api.docs.list().then((list) => {
       if (!alive) return
       setMetas(list)
-      const templates = list.filter((m) => m.kind === 'template')
-      const preferred = [request.templateId, settings.lastTemplateId].find((id) => templates.some((t) => t.id === id))
+      const templates = list.filter((m) => m.kind === 'template' && m.docType === docType)
+      const preferred = [request.templateId, lastTemplateOf(settings, docType)].find((id) =>
+        templates.some((t) => t.id === id)
+      )
       const chosen = preferred ?? templates[0]?.id ?? ''
       setTemplateId(chosen)
       const from = request.source ?? templates.find((t) => t.id === chosen)
@@ -50,13 +56,20 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
-  const templates = useMemo(() => (metas ?? []).filter((m) => m.kind === 'template'), [metas])
-  const usedNumbers = useMemo(
-    () => new Set((metas ?? []).filter((m) => m.kind === 'quotation').map((m) => m.number.trim())),
-    [metas]
+  const templates = useMemo(
+    () => (metas ?? []).filter((m) => m.kind === 'template' && m.docType === docType),
+    [metas, docType]
   )
+  const usedNumbers = useMemo(
+    () =>
+      new Set((metas ?? []).filter((m) => m.kind === 'document' && m.docType === docType).map((m) => m.number.trim())),
+    [metas, docType]
+  )
+  /** What the new document is made from. A design without a bank account section has no use for an account. */
+  const from = request.source ?? templates.find((t) => t.id === templateId)
+  const usesAccount = from?.usesAccount ?? true
 
-  const numbering = { ...settings.numbering, auto, prefix }
+  const numbering = { ...saved, auto, prefix }
   const proposed = peekNumber(numbering)
   const number = (typed ?? (auto ? proposed.number : '')).trim()
   const sourceId = request.source?.id ?? templateId
@@ -73,13 +86,18 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
     if (!canCreate) return
     setBusy(true)
     try {
-      const doc = await createQuotation(sourceId, number, accountId === NONE ? null : accountId)
+      const doc = await createDocument(sourceId, number, accountId === NONE ? null : accountId)
       // The counter only advances when the suggested number was actually used.
       const usedSuggestion = auto && number === proposed.number
       saveSettings({
-        ...settings,
-        numbering: usedSuggestion ? consumeNumber(numbering, proposed.year, proposed.seq) : numbering,
-        lastTemplateId: request.source ? settings.lastTemplateId : templateId
+        ...withNumbering(
+          settings,
+          docType,
+          usedSuggestion ? consumeNumber(numbering, proposed.year, proposed.seq) : numbering,
+          request.source ? lastTemplateOf(settings, docType) : templateId
+        ),
+        // The new document is listed under its own type, so the app follows it there.
+        mode: docType
       })
       onCreated(doc)
     } catch (err) {
@@ -88,10 +106,13 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
     }
   }
 
-  if (metas && !request.source && templates.length === 0) {
+  // What the form shows depends on the templates, so it waits the moment it takes to read them.
+  if (!metas) return null
+
+  if (!request.source && templates.length === 0) {
     return (
       <Modal
-        title="New quotation"
+        title={`New ${words.one}`}
         onClose={onClose}
         footer={
           <>
@@ -100,6 +121,7 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
               variant="primary"
               onClick={() => {
                 onClose()
+                setMode(docType)
                 navigate({ name: 'templates' })
               }}
             >
@@ -109,7 +131,8 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
         }
       >
         <div className="modal-text">
-          There are no templates yet. A quotation starts from a template, so create or import one first.
+          There are no {words.one} templates yet. {docType === 'invoice' ? 'An invoice' : 'A quotation'} starts from a
+          template, so create or import one first.
         </div>
       </Modal>
     )
@@ -117,7 +140,7 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
 
   return (
     <Modal
-      title={request.source ? 'Duplicate quotation' : 'New quotation'}
+      title={request.source ? `Duplicate ${words.one}` : `New ${words.one}`}
       onClose={onClose}
       footer={
         <>
@@ -132,7 +155,7 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
         {request.source ? (
           <Field label="Copy of">
             <div className="static-value">
-              {[request.source.number, request.source.customer].filter(Boolean).join(' · ') || 'Untitled quotation'}
+              {[request.source.number, request.source.customer].filter(Boolean).join(' · ') || `Untitled ${words.one}`}
             </div>
           </Field>
         ) : (
@@ -145,19 +168,21 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
           </Field>
         )}
 
-        <Field
-          label="Bank account"
-          hint={settings.accounts.length === 0 ? 'No accounts yet. Add them in Settings.' : undefined}
-        >
-          <Select
-            value={accountId}
-            onChange={setAccountId}
-            options={[
-              ...settings.accounts.map((a) => ({ value: a.id, label: a.name || a.bank || 'Unnamed account' })),
-              { value: NONE, label: 'None' }
-            ]}
-          />
-        </Field>
+        {usesAccount && (
+          <Field
+            label="Bank account"
+            hint={settings.accounts.length === 0 ? 'No accounts yet. Add them in Settings.' : undefined}
+          >
+            <Select
+              value={accountId}
+              onChange={setAccountId}
+              options={[
+                ...settings.accounts.map((a) => ({ value: a.id, label: a.name || a.bank || 'Unnamed account' })),
+                { value: NONE, label: 'None' }
+              ]}
+            />
+          </Field>
+        )}
 
         <div className="form-group">
           <Toggle
@@ -166,7 +191,7 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
               setAuto(on)
               setTyped(null)
             }}
-            label="Generate the quotation number"
+            label={`Generate the ${words.one} number`}
             hint={auto ? 'Continues from the last number used.' : 'Off: type the number yourself.'}
           />
           <div className="form-row">
@@ -183,12 +208,12 @@ export function NewQuotationDialog({ request, onClose, onCreated }: Props) {
               </Field>
             )}
             <Field
-              label="Quotation number"
+              label={`${words.One} number`}
               hint={
                 number === '' ? (
-                  <span className="text-danger">A quotation number is required.</span>
+                  <span className="text-danger">{docType === 'invoice' ? 'An invoice' : 'A quotation'} number is required.</span>
                 ) : duplicate ? (
-                  <span className="text-warn">Another quotation already uses this number.</span>
+                  <span className="text-warn">Another {words.one} already uses this number.</span>
                 ) : auto && typed === null ? (
                   'You can still change it.'
                 ) : undefined

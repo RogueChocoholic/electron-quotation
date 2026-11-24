@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react'
-import { TOKENS, consumeNumber, peekNumber, todayStr, uid } from '@shared/calc'
+import { DOC_WORDS, consumeNumber, numberingOf, peekNumber, todayStr, uid, withNumbering } from '@shared/calc'
 import { TEXT_PRESETS, type TextPreset } from '@shared/seed'
 import type {
   AccountBlock,
@@ -114,24 +114,27 @@ function AccountSelect() {
 function NumberAndDate({ otherNumbers }: { otherNumbers: string[] }) {
   const { settings, saveSettings } = useApp()
   const { doc, update } = useDoc()
+  const words = DOC_WORDS[doc.docType]
   const number = doc.number.trim()
-  const next = peekNumber(settings.numbering)
+  // Quotations and invoices each continue their own series of numbers.
+  const numbering = numberingOf(settings, doc.docType)
+  const next = peekNumber(numbering)
   const duplicate = number !== '' && otherNumbers.includes(number)
 
   const useNext = (): void => {
     update((d) => ({ ...d, number: next.number }))
-    saveSettings({ ...settings, numbering: consumeNumber(settings.numbering, next.year, next.seq) })
+    saveSettings(withNumbering(settings, doc.docType, consumeNumber(numbering, next.year, next.seq)))
   }
 
   return (
-    <Group title="Quotation">
+    <Group title={words.One}>
       <Field
-        label="Quotation number"
+        label={`${words.One} number`}
         hint={
           number === '' ? (
-            <span className="text-danger">Required before the quotation can be exported.</span>
+            <span className="text-danger">Required before the {words.one} can be exported.</span>
           ) : duplicate ? (
-            <span className="text-warn">Another quotation already uses this number.</span>
+            <span className="text-warn">Another {words.one} already uses this number.</span>
           ) : undefined
         }
       >
@@ -142,7 +145,7 @@ function NumberAndDate({ otherNumbers }: { otherNumbers: string[] }) {
           onChange={(v) => update((d) => ({ ...d, number: v }))}
         />
       </Field>
-      {number === '' && settings.numbering.auto && (
+      {number === '' && numbering.auto && (
         <Button small onClick={useNext}>
           Use next number ({next.number})
         </Button>
@@ -447,7 +450,7 @@ function DocumentPanel({ otherNumbers }: { otherNumbers: string[] }) {
   const { doc, update } = useDoc()
   return (
     <>
-      {doc.kind === 'quotation' ? (
+      {doc.kind === 'document' ? (
         <NumberAndDate otherNumbers={otherNumbers} />
       ) : (
         <Group title="Template">
@@ -479,6 +482,8 @@ function SizeField({ value, onChange }: { value: number; onChange(size: number):
 }
 
 function TextPanel({ block: b, set }: { block: TextBlock; set(patch: Partial<TextBlock>): void }) {
+  const { doc } = useDoc()
+  const one = DOC_WORDS[doc.docType].one
   const presets: { key: TextPreset; label: string }[] = [
     { key: 'title', label: 'Title' },
     { key: 'heading', label: 'Heading' },
@@ -523,15 +528,23 @@ function TextPanel({ block: b, set }: { block: TextBlock; set(patch: Partial<Tex
       <Field label="Colour">
         <ColorPicker value={b.color} onChange={(color) => set({ color })} />
       </Field>
+      <Field label="Bold words in front" hint='Start the text with a bold label, such as "Specification:".'>
+        <TextInput value={b.lead} onChange={(lead) => set({ lead })} />
+      </Field>
+      <Field label="Set in from the left">
+        <NumberInput value={b.indent} min={0} max={150} step={0.5} suffix="mm" onChange={(indent) => set({ indent })} />
+      </Field>
       <p className="insp-hint">
-        Type <code>{TOKENS[0]}</code> to show the quotation total, <code>{TOKENS[1]}</code> for its number and{' '}
-        <code>{TOKENS[2]}</code> for its date. They are filled in when you click away.
+        Type <code>{'{total}'}</code> to show the {one} total, <code>{'{number}'}</code> for its number and{' '}
+        <code>{'{date}'}</code> for its date. Where the table has payment rows, <code>{'{paid}'}</code> is the amount
+        paid and <code>{'{balance}'}</code> what is left. They are filled in when you click away.
       </p>
     </>
   )
 }
 
 function FieldsPanel({ block: b, set }: { block: FieldsBlock; set(patch: Partial<FieldsBlock>): void }) {
+  const { doc } = useDoc()
   return (
     <>
       <SizeField value={b.size} onChange={(size) => set({ size })} />
@@ -562,7 +575,7 @@ function FieldsPanel({ block: b, set }: { block: FieldsBlock; set(patch: Partial
       </div>
       <p className="insp-hint">
         Point at a row and use its &#8943; button to make the label bold, print the row in grey, link the value to
-        the quotation number or date, reorder it, or remove it.
+        the {DOC_WORDS[doc.docType].one} number or date, reorder it, or remove it.
       </p>
     </>
   )
@@ -571,21 +584,69 @@ function FieldsPanel({ block: b, set }: { block: FieldsBlock; set(patch: Partial
 function ItemsPanel({ block: b, set }: { block: ItemsBlock; set(patch: Partial<ItemsBlock>): void }) {
   return (
     <>
-      <SizeField value={b.size} onChange={(size) => set({ size })} />
+      <div className="grid-2">
+        <SizeField value={b.size} onChange={(size) => set({ size })} />
+        <Field label="Amount column">
+          <NumberInput
+            value={b.amountWidth}
+            min={15}
+            max={90}
+            step={1}
+            suffix="mm"
+            onChange={(amountWidth) => set({ amountWidth })}
+          />
+        </Field>
+      </div>
+      <Toggle
+        checked={b.showQty}
+        onChange={(showQty) => set({ showQty })}
+        label="Quantity column"
+        hint={b.showQty ? undefined : 'Off: every amount counts as it is typed.'}
+      />
+      <Toggle
+        checked={b.decimals === 'always'}
+        onChange={(on) => set({ decimals: on ? 'always' : 'auto' })}
+        label="Always show cents"
+        hint={b.decimals === 'always' ? '185,000.00' : '185,000 - cents show only when there are any.'}
+      />
       <Toggle
         checked={b.hideRowAmounts}
         onChange={(hideRowAmounts) => set({ hideRowAmounts })}
         label="Hide row amounts in PDF and Word"
         hint="Amounts stay editable here and still count towards the total."
       />
-      <p className="insp-hint">
-        Total = the sum of Qty &times; Amount for every row. A row with no Qty counts as 1. Press Enter in a
-        description to add a row below it.
-      </p>
-      <p className="insp-hint">
-        For a row that needs no quantity, point at it and use its &#8943; button to remove the quantity cell. Its
-        amount can stay empty; if one is typed, it is added to the total as it is.
-      </p>
+      <Toggle checked={b.showTotal} onChange={(showTotal) => set({ showTotal })} label="Total row" />
+      <Toggle
+        checked={b.showPayment}
+        onChange={(showPayment) => set({ showPayment })}
+        label="Amount paid and balance rows"
+        hint={b.showPayment ? 'Type the amount paid in the table. Balance = total - amount paid.' : undefined}
+      />
+      {(b.showTotal || b.showPayment) && (
+        <Toggle
+          checked={b.boxTotals}
+          onChange={(boxTotals) => set({ boxTotals })}
+          label="Borders around their labels"
+          hint="Draws the rows under the items as part of the table."
+        />
+      )}
+      {b.showQty ? (
+        <>
+          <p className="insp-hint">
+            Total = the sum of Qty &times; Amount for every row. A row with no Qty counts as 1. Press Enter in a
+            description to add a row below it.
+          </p>
+          <p className="insp-hint">
+            For a row that needs no quantity, point at it and use its &#8943; button to remove the quantity cell. Its
+            amount can stay empty; if one is typed, it is added to the total as it is.
+          </p>
+        </>
+      ) : (
+        <p className="insp-hint">
+          Total = the sum of the amounts. An amount can stay empty. Press Enter in a description to add a row below
+          it.
+        </p>
+      )}
     </>
   )
 }
@@ -784,7 +845,7 @@ export function Inspector({
     <aside className="inspector">
       <div className="insp-tabs" role="tablist">
         <button type="button" className={cx(tab === 'document' && 'is-active')} onClick={() => onTab('document')}>
-          {doc.kind === 'template' ? 'Template' : 'Quotation'}
+          {doc.kind === 'template' ? 'Template' : DOC_WORDS[doc.docType].One}
         </button>
         <button type="button" className={cx(tab === 'section' && 'is-active')} onClick={() => onTab('section')}>
           Section

@@ -35,6 +35,7 @@ import {
   ACCOUNT_LABEL_W,
   CAPTION_PT,
   CELL_PAD,
+  DOC_WORDS,
   FIELD_ROW_H,
   FOOTER_COLOR,
   FOOTER_PT,
@@ -44,8 +45,6 @@ import {
   HEADER_LINE_PT,
   HEADER_NAME_H,
   HEADER_NAME_PT,
-  ITEM_AMOUNT_W,
-  ITEM_QTY_W,
   LIST_HANGING,
   LIST_INDENT,
   MUTED_COLOR,
@@ -56,7 +55,8 @@ import {
   fmtAmount,
   fmtPrice,
   isLinkText,
-  itemsTotal,
+  itemsSummary,
+  itemsWidths,
   resolveTokens
 } from '@shared/calc'
 import type {
@@ -233,13 +233,17 @@ function buildFooter(doc: QDoc): Footer {
 
 function buildText(b: TextBlock, doc: QDoc): Child[] {
   const lines = resolveTokens(b.text, doc).replace(/\n$/, '').split('\n')
+  const run = (text: string, bold: boolean): TextRun =>
+    new TextRun({ text, bold, size: half(b.size), color: hex(b.color) })
   return lines.map(
     (text, i) =>
       new Paragraph({
         alignment: ALIGN[b.align],
+        indent: b.indent > 0 ? { left: tw(b.indent) } : undefined,
         spacing: { before: i === 0 ? tw(b.spaceBefore) : 0, after: 0, line: LINE },
         run: { size: half(b.size) },
-        children: [new TextRun({ text, bold: b.bold, size: half(b.size), color: hex(b.color) })]
+        // The bold lead-in shares the first line with the start of the text.
+        children: i === 0 && b.lead ? [run(b.lead, true), run(` ${text}`, b.bold)] : [run(text, b.bold)]
       })
   )
 }
@@ -306,12 +310,15 @@ function buildFields(b: FieldsBlock, doc: QDoc, contentW: number): Child[] {
 }
 
 function buildItems(b: ItemsBlock, contentW: number): Child[] {
-  const widths = [Math.max(20, contentW - ITEM_QTY_W - ITEM_AMOUNT_W), ITEM_QTY_W, ITEM_AMOUNT_W]
-  type CellOpts = { bold?: boolean; right?: boolean; span?: number; borders?: ITableCellBorders }
+  const widths = itemsWidths(b, contentW)
+  const amountCol = widths.length - 1
+  /** Width of everything left of the amount column: the description, and the quantity if there is one. */
+  const labelW = widths.slice(0, amountCol).reduce((a, w) => a + w, 0)
+  type CellOpts = { bold?: boolean; right?: boolean; wide?: boolean; borders?: ITableCellBorders }
   const cell = (text: string, col: number, o: CellOpts = {}): TableCell =>
     new TableCell({
-      width: { size: tw(o.span ? widths[0] + widths[1] : widths[col]), type: WidthType.DXA },
-      columnSpan: o.span,
+      width: { size: tw(o.wide ? labelW : widths[col]), type: WidthType.DXA },
+      columnSpan: o.wide && amountCol > 1 ? amountCol : undefined,
       margins: { left: tw(CELL_PAD), right: tw(CELL_PAD), top: 0, bottom: 0 },
       borders: o.borders ?? ALL_BORDERS,
       children: [
@@ -329,8 +336,8 @@ function buildItems(b: ItemsBlock, contentW: number): Child[] {
       cantSplit: true,
       children: [
         cell(b.descriptionLabel, 0, { bold: true }),
-        cell(b.qtyLabel, 1, { bold: true, right: true }),
-        cell(b.amountLabel, 2, { bold: true, right: true })
+        ...(b.showQty ? [cell(b.qtyLabel, 1, { bold: true, right: true })] : []),
+        cell(b.amountLabel, amountCol, { bold: true, right: true })
       ]
     }),
     ...b.rows.map(
@@ -338,25 +345,31 @@ function buildItems(b: ItemsBlock, contentW: number): Child[] {
         new TableRow({
           cantSplit: true,
           children: [
-            ...(r.hasQty
+            ...(b.showQty && r.hasQty
               ? [cell(r.description, 0), cell(r.qty, 1, { right: true })]
-              : [cell(r.description, 0, { span: 2 })]),
-            cell(b.hideRowAmounts ? '' : fmtPrice(r.price), 2, { right: true })
+              : [cell(r.description, 0, { wide: true })]),
+            cell(b.hideRowAmounts ? '' : fmtPrice(r.price, b.decimals), amountCol, { right: true })
           ]
         })
     ),
-    new TableRow({
-      cantSplit: true,
-      children: [
-        cell(b.totalLabel, 0, {
-          bold: true,
-          right: true,
-          span: 2,
-          borders: { top: THIN, left: NONE, bottom: NONE, right: THIN }
-        }),
-        cell(fmtAmount(itemsTotal(b)), 2, { bold: true, right: true })
-      ]
-    })
+    ...itemsSummary(b).map(
+      (row, i) =>
+        new TableRow({
+          cantSplit: true,
+          children: [
+            cell(row.label, 0, {
+              bold: true,
+              right: true,
+              wide: true,
+              // Unboxed, the label stands outside the grid: only the first keeps the line above it.
+              borders: b.boxTotals
+                ? ALL_BORDERS
+                : { top: i === 0 ? THIN : NONE, left: NONE, bottom: NONE, right: THIN }
+            }),
+            cell(row.value, amountCol, { bold: true, right: true })
+          ]
+        })
+    )
   ]
 
   return [
@@ -466,8 +479,8 @@ export async function renderDocx(doc: QDoc, account: Account | null): Promise<Bu
 
   const document = new Document({
     creator: 'Quotation Maker',
-    title: doc.kind === 'template' ? doc.name : doc.number || 'Quotation',
-    description: doc.kind === 'quotation' ? `Total ${fmtAmount(docTotal(doc), 'always')}` : undefined,
+    title: doc.kind === 'template' ? doc.name : doc.number || DOC_WORDS[doc.docType].One,
+    description: doc.kind === 'document' ? `Total ${fmtAmount(docTotal(doc), 'always')}` : undefined,
     // Embedded so the file looks the same on PCs that do not have Outfit installed.
     fonts: [
       {

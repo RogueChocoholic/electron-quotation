@@ -17,7 +17,7 @@ export interface Fragment {
   first: boolean
   /** Items tables only: the half-open row range shown in this piece. */
   rows?: [number, number]
-  /** Items tables only: whether the total row is shown in this piece. */
+  /** Items tables only: whether the rows under the items (total, paid, balance) are shown in this piece. */
   showTotal?: boolean
 }
 
@@ -48,7 +48,8 @@ export function measure(root: HTMLElement, zoom: number, doc: QDoc): Measures {
         pad: b.spaceBefore * PX_PER_MM,
         head: height(root.querySelector(`[data-items-head="${b.id}"]`)),
         rows: b.rows.map((r) => height(root.querySelector(`[data-items-row="${r.id}"]`))),
-        total: height(root.querySelector(`[data-items-total="${b.id}"]`))
+        // The total, amount paid and balance rows stay together under the last item.
+        total: [...root.querySelectorAll(`[data-items-total="${b.id}"]`)].reduce((sum, el) => sum + height(el), 0)
       })
     } else {
       blocks.set(b.id, height(root.querySelector(`[data-block-id="${b.id}"]`)))

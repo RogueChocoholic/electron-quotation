@@ -63,7 +63,11 @@ interface BlockBase {
 
 export interface TextBlock extends BlockBase {
   type: 'text'
+  /** Bold words printed in front of the text on its first line, e.g. "Specification:". */
+  lead: string
   text: string
+  /** Distance in mm the text is set in from the left margin, e.g. to line up with a table's text. */
+  indent: number
   /** Font size in pt. */
   size: number
   bold: boolean
@@ -81,7 +85,7 @@ export interface FieldRow {
   /** Label and value are printed in grey, for secondary details. */
   muted: boolean
   /**
-   * 'number' and 'date' rows show the quotation's own number and date.
+   * 'number' and 'date' rows show the document's own number and date.
    * 'customer' marks the row whose value is listed as the customer name.
    */
   bind: FieldBind
@@ -122,7 +126,24 @@ export interface ItemsBlock extends BlockBase {
   /** When true the per-row amounts stay editable on screen but are left blank in exports. */
   hideRowAmounts: boolean
   size: number
+  /** False leaves the quantity column out of the whole table; every amount then counts as typed. */
+  showQty: boolean
+  /** Width of the amount column in mm. */
+  amountWidth: number
+  /** 'always' prints every amount with cents (185,000.00); 'auto' only when there are any. */
+  decimals: AmountDecimals
+  showTotal: boolean
+  /** Draws the label cells of the rows under the items with borders, like the rows above them. */
+  boxTotals: boolean
+  /** Adds a row for an amount already paid, typed in the table, and a row for what is left. */
+  showPayment: boolean
+  paidLabel: string
+  /** The amount paid, as typed. */
+  paid: string
+  balanceLabel: string
 }
+
+export type AmountDecimals = 'auto' | 'always'
 
 export interface ListItem {
   id: string
@@ -163,13 +184,21 @@ export interface AccountBlock extends BlockBase {
 export type Block = TextBlock | FieldsBlock | ItemsBlock | ListBlock | ImagesBlock | AccountBlock
 export type BlockType = Block['type']
 
-export type DocKind = 'quotation' | 'template'
+/** A template, or a document made from one. */
+export type DocKind = 'document' | 'template'
+
+/**
+ * What a document or template is for. Both types are built from the same sections; they
+ * differ in their built-in template, their number series and where they are listed.
+ */
+export type DocType = 'quotation' | 'invoice'
 
 export interface QDoc {
   schema: 1
   id: string
   kind: DocKind
-  /** Template name. Unused for quotations. */
+  docType: DocType
+  /** Template name. Unused for documents. */
   name: string
   number: string
   date: string
@@ -184,12 +213,15 @@ export interface QDoc {
 export interface DocMeta {
   id: string
   kind: DocKind
+  docType: DocType
   name: string
   number: string
   date: string
   customer: string
   total: number
   accountId: string | null
+  /** Whether the page has a bank account section. */
+  usesAccount: boolean
   updatedAt: string
 }
 
@@ -220,10 +252,19 @@ export interface Settings {
   schema: 1
   accounts: Account[]
   defaultAccountId: string | null
+  /** Quotation numbers. */
   numbering: Numbering
+  /** Invoice numbers: a series of their own. */
+  invoiceNumbering: Numbering
+  /** The template last used for a quotation, and for an invoice. */
   lastTemplateId: string | null
-  /** Version of the built-in design this PC's templates were last brought up to. */
+  lastInvoiceTemplateId: string | null
+  /** Which type of document the app is currently showing. */
+  mode: DocType
+  /** Version of the built-in quotation design this PC's templates were last brought up to. */
   builtinDesign: number
+  /** Version of the built-in invoice design this PC has been given; 0 when it has none yet. */
+  builtinInvoice: number
 }
 
 export interface PickedImage {
@@ -282,7 +323,8 @@ export interface Api {
     /** Blocks until the document is on disk. Used only while the window is closing. */
     saveSync(doc: QDoc): boolean
     remove(id: string): Promise<void>
-    createDefaultTemplate(): Promise<QDoc>
+    /** Adds a copy of the built-in design for this type of document to the templates. */
+    createDefaultTemplate(docType: DocType): Promise<QDoc>
   }
   assets: {
     pick(): Promise<PickedImage | null>

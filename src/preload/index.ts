@@ -18,7 +18,7 @@ const api: Api = {
     save: (doc) => ipcRenderer.invoke('docs:save', doc),
     saveSync: (doc) => ipcRenderer.sendSync('docs:saveSync', doc) === true,
     remove: (id) => ipcRenderer.invoke('docs:remove', id),
-    createDefaultTemplate: () => ipcRenderer.invoke('docs:createDefaultTemplate')
+    createDefaultTemplate: (docType) => ipcRenderer.invoke('docs:createDefaultTemplate', docType)
   },
   assets: {
     pick: () => ipcRenderer.invoke('assets:pick')

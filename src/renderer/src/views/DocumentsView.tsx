@@ -1,12 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { fmtAmount } from '@shared/calc'
+import { DOC_WORDS, fmtAmount } from '@shared/calc'
 import type { DocMeta } from '@shared/types'
 import { errorText, formatWhen, useApp } from '../app/context'
 import { IconDoc, IconMore, IconPlus, IconSearch } from '../ui/icons'
 import { Button, IconButton, useConfirm, useMenu, useToast } from '../ui/ui'
 
-export function QuotationsView() {
-  const { navigate, newQuotation } = useApp()
+/** The list of quotations or of invoices, whichever the app is switched to. */
+export function DocumentsView() {
+  const { navigate, newDocument, mode } = useApp()
+  const words = DOC_WORDS[mode]
   const toast = useToast()
   const confirm = useConfirm()
   const openMenu = useMenu()
@@ -26,21 +28,21 @@ export function QuotationsView() {
     void reload()
   }, [reload])
 
-  const quotations = useMemo(() => (metas ?? []).filter((m) => m.kind === 'quotation'), [metas])
+  const docs = useMemo(() => (metas ?? []).filter((m) => m.kind === 'document' && m.docType === mode), [metas, mode])
   const visible = useMemo(() => {
     const q = query.trim().toLowerCase()
-    if (!q) return quotations
-    return quotations.filter((m) => `${m.number} ${m.customer} ${m.date}`.toLowerCase().includes(q))
-  }, [quotations, query])
+    if (!q) return docs
+    return docs.filter((m) => `${m.number} ${m.customer} ${m.date}`.toLowerCase().includes(q))
+  }, [docs, query])
 
-  const open = (m: DocMeta): void => navigate({ name: 'editor', id: m.id, from: 'quotations' })
+  const open = (m: DocMeta): void => navigate({ name: 'editor', id: m.id, from: 'documents' })
 
   const remove = async (m: DocMeta): Promise<void> => {
     const ok = await confirm({
-      title: 'Delete quotation',
+      title: `Delete ${words.one}`,
       body: (
         <>
-          Delete quotation <strong>{m.number || 'without a number'}</strong>
+          Delete {words.one} <strong>{m.number || 'without a number'}</strong>
           {m.customer ? ` for ${m.customer}` : ''}? This cannot be undone.
         </>
       ),
@@ -50,7 +52,7 @@ export function QuotationsView() {
     if (!ok) return
     try {
       await window.api.docs.remove(m.id)
-      toast({ message: 'Quotation deleted.' })
+      toast({ message: `${words.One} deleted.` })
     } catch (err) {
       toast({ kind: 'error', message: errorText(err) })
     }
@@ -61,9 +63,9 @@ export function QuotationsView() {
     <div className="view">
       <header className="view-head">
         <div>
-          <h1>Quotations</h1>
+          <h1>{words.Many}</h1>
           <p className="view-sub">
-            {metas === null ? ' ' : quotations.length === 1 ? '1 quotation' : `${quotations.length} quotations`}
+            {metas === null ? ' ' : docs.length === 1 ? `1 ${words.one}` : `${docs.length} ${words.many}`}
           </p>
         </div>
         <div className="view-actions">
@@ -76,26 +78,26 @@ export function QuotationsView() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </label>
-          <Button variant="primary" icon={<IconPlus />} onClick={() => newQuotation()}>
-            New quotation
+          <Button variant="primary" icon={<IconPlus />} onClick={() => newDocument()}>
+            New {words.one}
           </Button>
         </div>
       </header>
 
-      {metas !== null && quotations.length === 0 && (
+      {metas !== null && docs.length === 0 && (
         <div className="empty">
           <div className="empty-icon">
             <IconDoc />
           </div>
-          <h2>No quotations yet</h2>
+          <h2>No {words.many} yet</h2>
           <p>Create one from a template. The number, date and total are filled in for you.</p>
-          <Button variant="primary" icon={<IconPlus />} onClick={() => newQuotation()}>
-            New quotation
+          <Button variant="primary" icon={<IconPlus />} onClick={() => newDocument()}>
+            New {words.one}
           </Button>
         </div>
       )}
 
-      {quotations.length > 0 && (
+      {docs.length > 0 && (
         <table className="list-table">
           <thead>
             <tr>
@@ -124,7 +126,7 @@ export function QuotationsView() {
                       e.stopPropagation()
                       openMenu(e.currentTarget, [
                         { label: 'Open', onSelect: () => open(m) },
-                        { label: 'Duplicate', onSelect: () => newQuotation({ source: m }) },
+                        { label: 'Duplicate', onSelect: () => newDocument({ source: m }) },
                         { separator: true },
                         { label: 'Delete', danger: true, onSelect: () => void remove(m) }
                       ])
@@ -138,7 +140,7 @@ export function QuotationsView() {
             {visible.length === 0 && (
               <tr className="no-hover">
                 <td colSpan={6} className="muted center">
-                  No quotations match "{query}".
+                  No {words.many} match "{query}".
                 </td>
               </tr>
             )}

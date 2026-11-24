@@ -1,16 +1,19 @@
 import { createContext, useContext } from 'react'
-import type { AppInfo, DocMeta, Settings, UpdateStatus } from '@shared/types'
+import type { AppInfo, DocMeta, DocType, Settings, UpdateStatus } from '@shared/types'
 
 export type Route =
-  | { name: 'quotations' }
+  /** The list of quotations or of invoices, whichever the app is switched to. */
+  | { name: 'documents' }
   | { name: 'templates' }
   | { name: 'settings' }
-  | { name: 'editor'; id: string; from: 'quotations' | 'templates' }
+  | { name: 'editor'; id: string; from: 'documents' | 'templates' }
 
-export interface NewQuotationRequest {
+export interface NewDocumentRequest {
+  /** Quotation or invoice. Defaults to what the app is switched to. */
+  docType?: DocType
   /** Preselect this template. */
   templateId?: string
-  /** Copy an existing quotation instead of starting from a template. */
+  /** Copy an existing document instead of starting from a template. */
   source?: DocMeta
 }
 
@@ -22,7 +25,11 @@ export interface AppContextValue {
   update: UpdateStatus
   route: Route
   navigate(route: Route): void
-  newQuotation(request?: NewQuotationRequest): void
+  /** Whether the app is showing quotations or invoices: the lists, the templates and what "New" makes. */
+  mode: DocType
+  setMode(mode: DocType): void
+  /** Opens the dialog that creates a quotation or an invoice. */
+  newDocument(request?: NewDocumentRequest): void
 }
 
 export const AppContext = createContext<AppContextValue | null>(null)

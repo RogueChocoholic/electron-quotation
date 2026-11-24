@@ -112,7 +112,9 @@ export function registerIpc(): void {
   ipcMain.handle('docs:remove', (_e, id: unknown) => {
     if (typeof id === 'string') deleteDoc(id)
   })
-  ipcMain.handle('docs:createDefaultTemplate', () => createDefaultTemplate())
+  ipcMain.handle('docs:createDefaultTemplate', (_e, docType: unknown) =>
+    createDefaultTemplate(docType === 'invoice' ? 'invoice' : 'quotation')
+  )
 
   ipcMain.handle('assets:pick', async (event) => {
     const win = owner(event)

@@ -6,12 +6,16 @@ import { collectAssets, docMeta, remapAssets, uid } from '@shared/calc'
 import { ASSET_RE, ID_RE, sanitizeDoc, sanitizeSettings } from '@shared/sanitize'
 import {
   BUILTIN_DESIGN,
+  BUILTIN_INVOICE,
+  BUILTIN_INVOICE_NAME,
   BUILTIN_TEMPLATE_NAME,
+  ITEMS_DEFAULTS,
   buildDefaultTemplate,
+  buildInvoiceTemplate,
   defaultSettings,
   type SeedAssets
 } from '@shared/seed'
-import type { AssetId, DocMeta, PickedImage, QDoc, Settings } from '@shared/types'
+import type { AssetId, DocMeta, DocType, PickedImage, QDoc, Settings } from '@shared/types'
 import seedBackground from '../../resources/seed/background.png?asset'
 import seedIconLocation from '../../resources/seed/icon-1.png?asset'
 import seedIconEmail from '../../resources/seed/icon-2.png?asset'
@@ -25,7 +29,7 @@ import seedPhotoOutside from '../../resources/seed/photo-2.jpg?asset'
  * so installing an update never touches it:
  *
  *   settings.json        bank accounts and numbering
- *   docs/<id>.json       quotations and templates
+ *   docs/<id>.json       quotations, invoices and templates
  *   assets/<hash>.<ext>  images, stored once and referenced by id
  */
 
@@ -165,10 +169,11 @@ function seedAssets(): SeedAssets {
   }
 }
 
-/** Adds a fresh copy of the built-in design to the template list. */
-export function createDefaultTemplate(): QDoc {
-  const settings = getSettings()
-  return saveDoc(buildDefaultTemplate(seedAssets(), settings.defaultAccountId))
+/** Adds a fresh copy of the built-in quotation or invoice design to the template list. */
+export function createDefaultTemplate(docType: DocType = 'quotation'): QDoc {
+  const { defaultAccountId } = getSettings()
+  const build = docType === 'invoice' ? buildInvoiceTemplate : buildDefaultTemplate
+  return saveDoc(build(seedAssets(), defaultAccountId))
 }
 
 /** A document's design with everything that differs from copy to copy (ids, dates, account) left out. */
@@ -184,7 +189,7 @@ function designFingerprint(doc: QDoc): string {
  *
  * Templates that are still an exact, unedited copy of the old built-in design are replaced
  * with the new one. If the user has changed theirs, it is left alone and the new design is
- * added beside it. Quotations are never touched.
+ * added beside it. Quotations and invoices are never touched.
  */
 function upgradeBuiltinDesign(): void {
   const settings = getSettings()
@@ -192,7 +197,7 @@ function upgradeBuiltinDesign(): void {
   const assets = seedAssets()
   const previous = designFingerprint(buildDefaultTemplate(assets, null, settings.builtinDesign))
   const templates = listDocs()
-    .filter((m) => m.kind === 'template')
+    .filter((m) => m.kind === 'template' && m.docType === 'quotation')
     .flatMap((m) => getDoc(m.id) ?? [])
 
   let replaced = 0
@@ -212,21 +217,40 @@ function upgradeBuiltinDesign(): void {
 }
 
 /**
- * On the very first launch, writes the default settings and the built-in template.
- * On later launches, brings the built-in template up to date if an update changed it.
+ * Runs once after the update that brought invoices: gives a PC that was set up before then
+ * the built-in invoice template. Nothing that is already there is changed.
+ */
+function addBuiltinInvoice(): void {
+  const settings = getSettings()
+  if (settings.builtinInvoice >= BUILTIN_INVOICE) return
+  const taken = listDocs().some((m) => m.kind === 'template' && m.name === BUILTIN_INVOICE_NAME)
+  saveDoc({
+    ...buildInvoiceTemplate(seedAssets(), settings.defaultAccountId),
+    name: taken ? `${BUILTIN_INVOICE_NAME} (built-in)` : BUILTIN_INVOICE_NAME
+  })
+  saveSettings({ ...settings, builtinInvoice: BUILTIN_INVOICE })
+}
+
+/**
+ * On the very first launch, writes the default settings and the built-in templates.
+ * On later launches, brings the built-in templates up to date if an update changed them.
  */
 export function ensureSeed(): void {
   ensureDirs()
   if (!fs.existsSync(settingsFile())) {
     saveSettings(defaultSettings())
-    createDefaultTemplate()
+    createDefaultTemplate('quotation')
+    createDefaultTemplate('invoice')
     return
   }
-  try {
-    upgradeBuiltinDesign()
-  } catch (err) {
-    // Not worth stopping the app for; it is tried again on the next start.
-    console.error('Could not update the built-in template:', err)
+  // Each step stands on its own, so one failing does not hold the other back.
+  for (const step of [upgradeBuiltinDesign, addBuiltinInvoice]) {
+    try {
+      step()
+    } catch (err) {
+      // Not worth stopping the app for; it is tried again on the next start.
+      console.error('Could not update the built-in templates:', err)
+    }
   }
 }
 
@@ -236,12 +260,24 @@ const TEMPLATE_FORMAT = 'quotation-maker-template'
 
 /**
  * Version 2 added the header title and grey detail rows; version 3 added table rows without
- * a quantity cell. A file is marked with the version it needs, so that an app too old to show
- * something says "update the app" instead of quietly dropping it.
+ * a quantity cell; version 4 added invoices, with the table and text options they brought.
+ * A file is marked with the version it needs, so that an app too old to show something says
+ * "update the app" instead of quietly dropping it.
  */
-const TEMPLATE_VERSION = 3
+const TEMPLATE_VERSION = 4
 
 function templateVersionNeeded(doc: QDoc): number {
+  const sinceInvoices =
+    doc.docType === 'invoice' ||
+    doc.blocks.some((b) => {
+      if (b.type === 'text') return b.lead !== '' || b.indent !== 0
+      if (b.type !== 'items') return false
+      return (Object.keys(ITEMS_DEFAULTS) as (keyof typeof ITEMS_DEFAULTS)[]).some(
+        // The labels and the amount paid only show when the payment rows are switched on.
+        (key) => !['paidLabel', 'paid', 'balanceLabel'].includes(key) && b[key] !== ITEMS_DEFAULTS[key]
+      )
+    })
+  if (sinceInvoices) return 4
   const rowsWithoutQty = doc.blocks.some((b) => b.type === 'items' && b.rows.some((r) => !r.hasQty))
   return rowsWithoutQty ? 3 : 2
 }

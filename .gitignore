@@ -8,3 +8,4 @@ package-lock.json
 
 *.pdf
 *.docx
+*.qtpl

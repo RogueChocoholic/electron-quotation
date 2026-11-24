@@ -1,10 +1,13 @@
-import { uid } from './calc'
+import { ITEM_AMOUNT_W, uid } from './calc'
 import type {
   Account,
   Block,
   BlockType,
+  DocType,
   FieldRow,
   HeaderConfig,
+  ItemsBlock,
+  Numbering,
   PageConfig,
   PickedImage,
   QDoc,
@@ -22,6 +25,18 @@ export const SEED_ACCOUNT_ID = 'acc-default'
  */
 export const BUILTIN_DESIGN = 2
 export const BUILTIN_TEMPLATE_NAME = 'Mobile Washroom Quotation'
+
+/**
+ * Version of the built-in "Mobile Washroom" invoice design. A PC that has not been given the
+ * invoice template yet is at 0; see `addBuiltinInvoice` in the main process.
+ */
+export const BUILTIN_INVOICE = 1
+export const BUILTIN_INVOICE_NAME = 'Mobile Washroom Invoice'
+
+/** Invoices are numbered in a series of their own, separate from quotations. */
+export function defaultInvoiceNumbering(now = new Date()): Numbering {
+  return { auto: true, prefix: 'INV-', includeYear: true, yearlyReset: true, digits: 4, nextSeq: 1, seqYear: now.getFullYear() }
+}
 
 export function defaultSettings(now = new Date()): Settings {
   const account: Account = {
@@ -46,8 +61,12 @@ export function defaultSettings(now = new Date()): Settings {
       nextSeq: 18,
       seqYear: now.getFullYear()
     },
+    invoiceNumbering: defaultInvoiceNumbering(now),
     lastTemplateId: null,
-    builtinDesign: BUILTIN_DESIGN
+    lastInvoiceTemplateId: null,
+    mode: 'quotation',
+    builtinDesign: BUILTIN_DESIGN,
+    builtinInvoice: BUILTIN_INVOICE
   }
 }
 
@@ -76,7 +95,26 @@ function field(label: string, value = '', extra: Partial<FieldRow> = {}): FieldR
 }
 
 export function textBlock(text: string, preset: TextPreset, extra: Partial<TextBlock> = {}): TextBlock {
-  return { id: uid(), type: 'text', spaceBefore: 0, text, ...TEXT_PRESETS[preset], ...extra }
+  return { id: uid(), type: 'text', spaceBefore: 0, lead: '', text, indent: 0, ...TEXT_PRESETS[preset], ...extra }
+}
+
+/**
+ * How an items table behaves unless told otherwise. Tables saved before these options existed
+ * are given the same values when they are read, so they look and add up as they always did.
+ */
+export const ITEMS_DEFAULTS: Pick<
+  ItemsBlock,
+  'showQty' | 'amountWidth' | 'decimals' | 'showTotal' | 'boxTotals' | 'showPayment' | 'paidLabel' | 'paid' | 'balanceLabel'
+> = {
+  showQty: true,
+  amountWidth: ITEM_AMOUNT_W,
+  decimals: 'auto',
+  showTotal: true,
+  boxTotals: false,
+  showPayment: false,
+  paidLabel: 'Advance Payment received',
+  paid: '',
+  balanceLabel: 'Balance Payment'
 }
 
 /** A fresh block of the given type, used by the "add section" menu. */
@@ -107,7 +145,8 @@ export function newBlock(type: BlockType, preset: TextPreset = 'body'): Block {
         totalLabel: 'Total',
         rows: [{ id: uid(), description: '', qty: '1', price: '', hasQty: true }],
         hideRowAmounts: false,
-        size: 9
+        size: 9,
+        ...ITEMS_DEFAULTS
       }
     case 'list':
       return { id: uid(), type: 'list', spaceBefore: 0, items: [{ id: uid(), text: '' }], size: 8, color: '#000000' }
@@ -143,17 +182,11 @@ function stamp(): Pick<QDoc, 'createdAt' | 'updatedAt'> {
   return { createdAt: now, updatedAt: now }
 }
 
-/**
- * The built-in "Mobile Washroom" quotation design, rebuilt from the reference document.
- *
- * Older versions of the design can still be built. They are never offered to the user; they
- * exist so that an untouched copy of an old design can be recognised and brought up to date.
- */
-export function buildDefaultTemplate(a: SeedAssets, accountId: string | null, design = BUILTIN_DESIGN): QDoc {
-  const v1 = design < 2
-  const header: HeaderConfig = {
+/** The letterhead both built-in designs share; only the title beside the logo differs. */
+function letterhead(a: SeedAssets, title: HeaderConfig['title']): HeaderConfig {
+  return {
     background: a.background.asset,
-    title: v1 ? null : { text: 'QUOTATION', x: 46.1, y: 12.9, size: 20, bold: true },
+    title,
     logos: [
       {
         id: uid(),
@@ -173,6 +206,17 @@ export function buildDefaultTemplate(a: SeedAssets, accountId: string | null, de
     detailsTop: 5.5,
     detailsRight: 5.35
   }
+}
+
+/**
+ * The built-in "Mobile Washroom" quotation design, rebuilt from the reference document.
+ *
+ * Older versions of the design can still be built. They are never offered to the user; they
+ * exist so that an untouched copy of an old design can be recognised and brought up to date.
+ */
+export function buildDefaultTemplate(a: SeedAssets, accountId: string | null, design = BUILTIN_DESIGN): QDoc {
+  const v1 = design < 2
+  const header = letterhead(a, v1 ? null : { text: 'QUOTATION', x: 46.1, y: 12.9, size: 20, bold: true })
 
   const item = (description: string, qty: string) => ({ id: uid(), description, qty, price: '', hasQty: true })
   const bullet = (text: string) => ({ id: uid(), text })
@@ -231,7 +275,8 @@ export function buildDefaultTemplate(a: SeedAssets, accountId: string | null, de
         item('Toilet tissues, hand soap, and other essential consumables', '1')
       ],
       hideRowAmounts: false,
-      size: 9
+      size: 9,
+      ...ITEMS_DEFAULTS
     },
     textBlock('We are pleased to quote a sum of Rs. {total} for the above contract.', 'body', {
       size: 10,
@@ -285,6 +330,7 @@ export function buildDefaultTemplate(a: SeedAssets, accountId: string | null, de
     schema: 1,
     id: uid(),
     kind: 'template',
+    docType: 'quotation',
     name: BUILTIN_TEMPLATE_NAME,
     number: '',
     date: '',
@@ -296,12 +342,91 @@ export function buildDefaultTemplate(a: SeedAssets, accountId: string | null, de
   }
 }
 
-/** An empty design: no artwork, just a title, the details grid and an items table. */
-export function buildBlankTemplate(accountId: string | null): QDoc {
+/**
+ * The built-in "Mobile Washroom" invoice design, rebuilt from the reference invoice.
+ *
+ * It keeps the wording every invoice shares and leaves out what belongs to one customer: the
+ * name, the address under "Dear Sir,", the specification, and the description and amounts.
+ */
+export function buildInvoiceTemplate(a: SeedAssets, accountId: string | null): QDoc {
+  const blocks: Block[] = [
+    {
+      id: uid(),
+      type: 'fields',
+      spaceBefore: 0,
+      left: [field('Billed To:', '', { bold: true, bind: 'customer' })],
+      right: [
+        field('Issued Date:', '', { bold: true, bind: 'date' }),
+        field('Invoice No.:', '', { bold: true, bind: 'number' })
+      ],
+      split: 88.65,
+      leftLabelWidth: 29.7,
+      rightLabelWidth: 24.05,
+      size: 10
+    },
+    // The customer's address goes on the lines after the greeting.
+    textBlock('Dear Sir,', 'body', { size: 10, indent: 1.9 }),
+    textBlock('', 'body', { size: 10, align: 'center', lead: 'Specification:', spaceBefore: 5.35 }),
+    {
+      id: uid(),
+      type: 'items',
+      spaceBefore: 5.3,
+      descriptionLabel: 'Description',
+      qtyLabel: 'Qty',
+      amountLabel: 'Amount (LKR)',
+      totalLabel: 'Total',
+      rows: [{ id: uid(), description: '', qty: '1', price: '', hasQty: true }],
+      hideRowAmounts: false,
+      size: 10,
+      ...ITEMS_DEFAULTS,
+      showQty: false,
+      // Leaves the description column as wide as in the reference (115.8 mm).
+      amountWidth: 43.4,
+      decimals: 'always',
+      showTotal: false,
+      boxTotals: true,
+      showPayment: true
+    },
+    textBlock('Payment Method: Cash. Check Status: Advance payment received ({paid})', 'body', {
+      size: 11,
+      bold: true,
+      align: 'center',
+      spaceBefore: 4.05
+    }),
+    textBlock(`Approved By: ${'\u2026'.repeat(19)}.`, 'body', {
+      size: 10,
+      bold: true,
+      align: 'right',
+      spaceBefore: 16.25
+    }),
+    textBlock('Charuka Subasinghe\n(Business Development Manager)', 'body', { size: 10, align: 'right' }),
+    textBlock('Thank You!', 'body', { size: 11, bold: true, align: 'center', spaceBefore: 20.5 })
+  ]
+
   return {
     schema: 1,
     id: uid(),
     kind: 'template',
+    docType: 'invoice',
+    name: BUILTIN_INVOICE_NAME,
+    number: '',
+    date: '',
+    accountId,
+    header: letterhead(a, { text: 'INVOICE', x: 52.5, y: 12.9, size: 20, bold: true }),
+    page: { ...defaultPage(), marginTop: 42.3 },
+    blocks,
+    ...stamp()
+  }
+}
+
+/** An empty design: no artwork, just a title, the details grid and an items table. */
+export function buildBlankTemplate(accountId: string | null, docType: DocType = 'quotation'): QDoc {
+  const invoice = docType === 'invoice'
+  return {
+    schema: 1,
+    id: uid(),
+    kind: 'template',
+    docType,
     name: 'Untitled template',
     number: '',
     date: '',
@@ -317,12 +442,15 @@ export function buildBlankTemplate(accountId: string | null): QDoc {
     },
     page: { ...defaultPage(), marginTop: 30 },
     blocks: [
-      textBlock('QUOTATION', 'title'),
+      textBlock(invoice ? 'INVOICE' : 'QUOTATION', 'title'),
       {
         id: uid(),
         type: 'fields',
         spaceBefore: 2,
-        left: [field('Date', '', { bind: 'date' }), field('Quotation No.:', '', { bind: 'number' })],
+        left: [
+          field('Date', '', { bind: 'date' }),
+          field(invoice ? 'Invoice No.:' : 'Quotation No.:', '', { bind: 'number' })
+        ],
         right: [field('Name:', '', { bind: 'customer' }), field('Address:')],
         split: 88.65,
         leftLabelWidth: 29.7,
