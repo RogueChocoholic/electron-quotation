@@ -265,6 +265,39 @@ try {
   check(invoiceRows.length === 1 && invoiceRows[0].includes('INV-'), 'the invoice is listed under Invoices')
   check(invoiceRows[0].includes('Lakshitha') && invoiceRows[0].includes('185,000.00'), 'with its customer and total')
   await shot('17-invoices')
+
+  // A Word document becomes a template. Only run where the reference file is present.
+  const wordFile = path.join(root, 'mobilewashroom_invoice.docx')
+  if (fs.existsSync(wordFile)) {
+    await nav('Templates').click()
+    await page.locator('.card').first().waitFor()
+    await app.evaluate(({ dialog }, f) => {
+      dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] })
+    }, wordFile)
+    await page.getByRole('button', { name: 'Import' }).click()
+    await dialogEl.waitFor()
+    check((await dialogEl.innerText()).includes('Template made from the Word file'), 'importing a Word file says what to look over')
+    await shot('18-word-import')
+    await dialogEl.getByRole('button', { name: 'Open the template' }).click()
+    await page.locator('.page').first().waitFor()
+    await page.waitForTimeout(800)
+    check((await page.locator('.hdr-title').innerText()).trim() === 'INVOICE', 'the Word file became an invoice template')
+    check((await page.locator('.page').count()) === 1, 'which fits on one page')
+    check((await page.locator('.items tr[data-summary="balance"]').count()) === 1, 'with the payment rows of its table')
+    const brokenWord = await page.evaluate(
+      () => Array.from(document.images).filter((i) => i.complete && i.naturalWidth === 0).length
+    )
+    check(brokenWord === 0, 'and all of its images')
+    await shot('19-word-template')
+    await page.locator('.editor-bar button').first().click()
+    await page.locator('.card').first().waitFor()
+    check((await page.locator('.card').count()) === 2, 'it is listed with the invoice templates')
+    await nav('Invoices').click()
+    await page.getByRole('heading', { name: 'Invoices', exact: true }).waitFor()
+  } else {
+    console.log('     (mobilewashroom_invoice.docx is not in the project folder; Word import not checked)')
+  }
+
   await mode('Quotations').click()
   await page.getByRole('heading', { name: 'Quotations', exact: true }).waitFor()
   await page.locator('.list-table tbody tr').first().waitFor()
@@ -289,7 +322,8 @@ try {
     dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [f] })
   }, bundle)
   await page.getByRole('button', { name: 'Import' }).click()
-  await page.getByText('Template imported.').waitFor()
+  // The message of an earlier import may still be showing, so the new card is what is waited for.
+  await page.locator('.card').nth(1).waitFor()
   check((await page.locator('.card').count()) === 2, 'template imported')
   await shot('11-templates-imported')
   await page.locator('.card').nth(1).locator('.card-main').click()
@@ -321,9 +355,26 @@ try {
     check(footers.includes('Footer typed right before closing'), 'last edit survives closing the app')
     await p2.locator('.list-table tbody tr').first().waitFor({ timeout: 5000 }).catch(() => undefined)
     check((await p2.locator('.list-table tbody tr').count()) === 1, 'quotations are still there after a restart')
+
+    // What a newer version of the app saved is not written over by this one.
+    const refused = await p2.evaluate(async () => {
+      const metas = await window.api.docs.list()
+      const doc = await window.api.docs.get(metas[0].id)
+      try {
+        await window.api.docs.save({ ...doc, id: 'smoke-newer', dataVersion: 999 })
+        return false
+      } catch (e) {
+        return /newer version/.test(String(e?.message ?? e))
+      }
+    })
+    check(refused, 'a document marked as saved by a newer version is not saved')
   } finally {
     await again.close()
   }
+  const log = fs.existsSync(path.join(dataDir, 'log.txt')) ? fs.readFileSync(path.join(dataDir, 'log.txt'), 'utf8') : ''
+  check((log.match(/ {2}Started\./g) ?? []).length === 2, 'log.txt has a line for each start')
+  check(!/could not|Could not/.test(log), 'and reports no problem')
+  check(fs.existsSync(path.join(dataDir, 'shipped.json')), 'shipped.json is written')
 
   check(errors.length === 0, `no page errors${errors.length ? `:\n  ${errors.join('\n  ')}` : ''}`)
 } finally {

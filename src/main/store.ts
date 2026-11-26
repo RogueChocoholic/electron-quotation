@@ -2,7 +2,7 @@ import { app, nativeImage } from 'electron'
 import { createHash } from 'node:crypto'
 import fs from 'node:fs'
 import path from 'node:path'
-import { collectAssets, docMeta, remapAssets, uid } from '@shared/calc'
+import { DATA_VERSION, NEWER_DATA_MESSAGE, collectAssets, docMeta, isNewerData, remapAssets, uid } from '@shared/calc'
 import { ASSET_RE, ID_RE, sanitizeDoc, sanitizeSettings } from '@shared/sanitize'
 import {
   BUILTIN_DESIGN,
@@ -23,6 +23,8 @@ import seedIconPhone from '../../resources/seed/icon-3.png?asset'
 import seedLogo from '../../resources/seed/logo.png?asset'
 import seedPhotoInside from '../../resources/seed/photo-1.jpg?asset'
 import seedPhotoOutside from '../../resources/seed/photo-2.jpg?asset'
+import { DocxError } from './docxRead'
+import { docxToTemplate } from './importDocx'
 
 /**
  * All user data lives in the per-user app data folder, outside the install directory,
@@ -31,6 +33,8 @@ import seedPhotoOutside from '../../resources/seed/photo-2.jpg?asset'
  *   settings.json        bank accounts and numbering
  *   docs/<id>.json       quotations, invoices and templates
  *   assets/<hash>.<ext>  images, stored once and referenced by id
+ *   shipped.json         which templates that came with the app this PC has been given
+ *   log.txt              which versions were started here, and anything that went wrong at start
  */
 
 export const dataDir = (): string => app.getPath('userData')
@@ -38,6 +42,30 @@ const docsDir = (): string => path.join(dataDir(), 'docs')
 const assetsDir = (): string => path.join(dataDir(), 'assets')
 const settingsFile = (): string => path.join(dataDir(), 'settings.json')
 const docFile = (id: string): string => path.join(docsDir(), `${id}.json`)
+const shippedFile = (): string => path.join(dataDir(), 'shipped.json')
+const logFile = (): string => path.join(dataDir(), 'log.txt')
+
+const LOG_MAX_BYTES = 256 * 1024
+
+/**
+ * Adds a line to log.txt in the data folder. A packaged app has no console to look at, so
+ * this is where a problem on someone else's PC can be read afterwards.
+ */
+export function logLine(message: string, err?: unknown): void {
+  try {
+    fs.mkdirSync(dataDir(), { recursive: true })
+    const file = logFile()
+    // Once the file has grown, its older half is dropped.
+    if (fs.existsSync(file) && fs.statSync(file).size > LOG_MAX_BYTES) {
+      const text = fs.readFileSync(file, 'utf8')
+      fs.writeFileSync(file, text.slice(text.indexOf('\n', Math.floor(text.length / 2)) + 1), 'utf8')
+    }
+    const detail = err === undefined ? '' : `: ${err instanceof Error ? (err.stack ?? err.message) : String(err)}`
+    fs.appendFileSync(file, `${new Date().toISOString()}  v${app.getVersion()}  ${message}${detail}\n`, 'utf8')
+  } catch {
+    // Logging must never be what stops the app.
+  }
+}
 
 function ensureDirs(): void {
   fs.mkdirSync(docsDir(), { recursive: true })
@@ -112,7 +140,10 @@ export function getSettings(): Settings {
 export function saveSettings(settings: unknown): Settings {
   ensureDirs()
   const clean = sanitizeSettings(settings)
-  writeJson(settingsFile(), clean)
+  // Anything in the file this version does not know was put there by a newer one, and is kept.
+  const existing = readJson(settingsFile())
+  const kept = existing && typeof existing === 'object' && !Array.isArray(existing) ? existing : {}
+  writeJson(settingsFile(), { ...kept, ...clean })
   return clean
 }
 
@@ -136,11 +167,20 @@ export function listDocs(): DocMeta[] {
   return out.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))
 }
 
+/** The data version of the file a document is stored in, read without cleaning it up first. */
+function storedDataVersion(id: string): number {
+  const raw = readJson(docFile(id)) as { dataVersion?: unknown } | null
+  return raw && typeof raw === 'object' && typeof raw.dataVersion === 'number' ? raw.dataVersion : 0
+}
+
 export function saveDoc(input: unknown): QDoc {
   const clean = sanitizeDoc(input)
   if (!clean) throw new Error('This document could not be saved because its data is not valid.')
   ensureDirs()
-  const doc: QDoc = { ...clean, updatedAt: new Date().toISOString() }
+  // Reading a newer document has already dropped what this version does not know. Writing it
+  // back, over the original or as a copy, would make that loss permanent.
+  if (isNewerData(clean) || storedDataVersion(clean.id) > DATA_VERSION) throw new Error(NEWER_DATA_MESSAGE)
+  const doc: QDoc = { ...clean, updatedAt: new Date().toISOString(), dataVersion: DATA_VERSION }
   writeJson(docFile(doc.id), doc)
   return doc
 }
@@ -180,7 +220,14 @@ export function createDefaultTemplate(docType: DocType = 'quotation'): QDoc {
 function designFingerprint(doc: QDoc): string {
   const clean = sanitizeDoc(doc)
   if (!clean) return ''
-  const { id: _id, createdAt: _created, updatedAt: _updated, accountId: _account, ...design } = clean
+  const {
+    id: _id,
+    createdAt: _created,
+    updatedAt: _updated,
+    accountId: _account,
+    dataVersion: _version,
+    ...design
+  } = clean
   return JSON.stringify(design, (key, value) => (key === 'id' ? undefined : value))
 }
 
@@ -199,6 +246,7 @@ function upgradeBuiltinDesign(): void {
   const templates = listDocs()
     .filter((m) => m.kind === 'template' && m.docType === 'quotation')
     .flatMap((m) => getDoc(m.id) ?? [])
+    .filter((t) => !isNewerData(t))
 
   let replaced = 0
   for (const old of templates) {
@@ -231,25 +279,169 @@ function addBuiltinInvoice(): void {
   saveSettings({ ...settings, builtinInvoice: BUILTIN_INVOICE })
 }
 
+// ------------------------------------------- what this PC has been given
+
+interface ShippedTemplate {
+  /** Hash of the file that was added, to tell when a release brings a changed one. */
+  hash: string
+  /** The template it became on this PC. */
+  docId: string
+  /** That template's time of last change when it was added; still the same means untouched. */
+  savedAt: string
+}
+
+/**
+ * Kept in a file of its own rather than in settings.json: versions of the app that do not
+ * know about it leave it alone, where they would drop an unknown setting when saving.
+ */
+interface Shipped {
+  /** One-off repairs that have been made on this PC, by name. */
+  repairs: Record<string, number>
+  /** Template files that came with the app and were added on this PC, by file name. */
+  templates: Record<string, ShippedTemplate>
+}
+
+function readShipped(): Shipped {
+  const raw = readJson(shippedFile()) as Partial<Shipped> | null
+  const out: Shipped = { repairs: {}, templates: {} }
+  if (!raw || typeof raw !== 'object') return out
+  for (const [key, value] of Object.entries(raw.repairs ?? {})) {
+    if (typeof value === 'number') out.repairs[key] = value
+  }
+  for (const [key, value] of Object.entries(raw.templates ?? {})) {
+    if (!value || typeof value !== 'object') continue
+    const { hash, docId, savedAt } = value as Partial<ShippedTemplate>
+    if (typeof hash === 'string' && typeof docId === 'string' && typeof savedAt === 'string') {
+      out.templates[key] = { hash, docId, savedAt }
+    }
+  }
+  return out
+}
+
+/**
+ * Runs once on every PC: if there is no invoice template at all, the built-in one is added.
+ *
+ * `addBuiltinInvoice` relies on a marker in settings.json, and that marker can say "done"
+ * on a PC that has no invoice template: for example when a version from before invoices
+ * re-saved the template, which made it a quotation template. Looking at what is actually
+ * there does not depend on how the PC got into that state.
+ */
+function restoreInvoiceTemplate(): void {
+  const shipped = readShipped()
+  if (shipped.repairs.invoiceTemplate) return
+  const present = listDocs().some((m) => m.kind === 'template' && m.docType === 'invoice')
+  if (!present) {
+    createDefaultTemplate('invoice')
+    logLine('This PC had no invoice template; the built-in one was added.')
+  }
+  writeJson(shippedFile(), { ...readShipped(), repairs: { ...shipped.repairs, invoiceTemplate: 1 } })
+}
+
+/** Template files in this project folder are packed into the installer; see its README. */
+const bundledDir = (): string => path.join(app.getAppPath(), 'resources', 'templates')
+
+const sha = (text: string): string => createHash('sha256').update(text).digest('hex').slice(0, 32)
+
+/** The same for two templates that look the same, whatever they are called. */
+const sameDesignKey = (doc: QDoc): string => sha(designFingerprint({ ...doc, name: '' }))
+
+function freeName(name: string, taken: string[]): string {
+  if (!taken.includes(name)) return name
+  for (let n = 2; ; n += 1) {
+    const candidate = `${name} (${n})`
+    if (!taken.includes(candidate)) return candidate
+  }
+}
+
+/**
+ * Adds one template file that came with the app, unless this PC already has this very file.
+ *
+ * - A design that is already among the templates (as on the PC it was made on) is not added twice.
+ * - When a release brings a changed file, the template added from the earlier file is replaced
+ *   if nobody has touched it; otherwise it is left alone and the new one is added beside it.
+ * - A template that was deleted stays deleted until the file changes.
+ */
+function deliverBundledTemplate(name: string): void {
+  const text = fs.readFileSync(path.join(bundledDir(), name), 'utf8')
+  const hash = sha(text)
+  const before = readShipped().templates[name]
+  if (before?.hash === hash) return
+
+  const incoming = readTemplateBundle(text)
+  const templates = listDocs()
+    .filter((m) => m.kind === 'template')
+    .flatMap((m) => getDoc(m.id) ?? [])
+    .filter((t) => !isNewerData(t))
+  const key = sameDesignKey(incoming)
+  const same = templates.find((t) => sameDesignKey(t) === key)
+  const earlier = before ? templates.find((t) => t.id === before.docId) : undefined
+
+  let result: QDoc
+  let what: string
+  if (same) {
+    result = same
+    what = 'was already among the templates'
+  } else if (earlier && before && earlier.updatedAt === before.savedAt) {
+    result = saveDoc({ ...incoming, id: earlier.id, createdAt: earlier.createdAt, accountId: earlier.accountId })
+    what = 'replaced the earlier one'
+  } else {
+    const taken = templates.filter((t) => t.docType === incoming.docType).map((t) => t.name)
+    result = saveDoc({ ...incoming, name: freeName(incoming.name, taken) })
+    what = `was added as "${result.name}"`
+  }
+  const shipped = readShipped()
+  writeJson(shippedFile(), {
+    ...shipped,
+    templates: { ...shipped.templates, [name]: { hash, docId: result.id, savedAt: result.updatedAt } }
+  })
+  logLine(`The template file ${name} that came with the app ${what}.`)
+}
+
+function deliverBundledTemplates(): void {
+  let names: string[]
+  try {
+    names = fs
+      .readdirSync(bundledDir())
+      .filter((n) => n.toLowerCase().endsWith('.qtpl'))
+      .sort()
+  } catch {
+    // No folder, no templates to add.
+    return
+  }
+  for (const name of names) {
+    try {
+      deliverBundledTemplate(name)
+    } catch (err) {
+      logLine(`The template file ${name} that came with the app could not be added`, err)
+    }
+  }
+}
+
 /**
  * On the very first launch, writes the default settings and the built-in templates.
- * On later launches, brings the built-in templates up to date if an update changed them.
+ * On every launch, brings the templates up to date with what this version of the app brings.
  */
 export function ensureSeed(): void {
   ensureDirs()
+  logLine('Started.')
   if (!fs.existsSync(settingsFile())) {
     saveSettings(defaultSettings())
     createDefaultTemplate('quotation')
     createDefaultTemplate('invoice')
-    return
   }
-  // Each step stands on its own, so one failing does not hold the other back.
-  for (const step of [upgradeBuiltinDesign, addBuiltinInvoice]) {
+  // Each step stands on its own, so one failing does not hold the others back. None is worth
+  // stopping the app for: a step that failed is tried again on the next start.
+  const steps: [string, () => void][] = [
+    ['bring the built-in quotation design up to date', upgradeBuiltinDesign],
+    ['add the built-in invoice template', addBuiltinInvoice],
+    ['check that there is an invoice template', restoreInvoiceTemplate],
+    ['add the templates that came with the app', deliverBundledTemplates]
+  ]
+  for (const [what, step] of steps) {
     try {
       step()
     } catch (err) {
-      // Not worth stopping the app for; it is tried again on the next start.
-      console.error('Could not update the built-in templates:', err)
+      logLine(`Could not ${what}`, err)
     }
   }
 }
@@ -306,8 +498,11 @@ export function buildTemplateBundle(doc: QDoc): string {
   return JSON.stringify(bundle)
 }
 
-/** Imports a bundle as a new template. Throws with a readable message when the file is not usable. */
-export function importTemplateBundle(text: string): QDoc {
+/**
+ * Reads a bundle into a new template that is ready to be saved, and stores its images.
+ * Throws with a readable message when the file is not usable.
+ */
+function readTemplateBundle(text: string): QDoc {
   let parsed: unknown
   try {
     parsed = JSON.parse(text)
@@ -323,6 +518,10 @@ export function importTemplateBundle(text: string): QDoc {
   }
   const template = sanitizeDoc(bundle.template)
   if (!template) throw new Error('The template inside the file is damaged.')
+  // The template itself also says which version saved it; see DATA_VERSION.
+  if (isNewerData(template)) {
+    throw new Error('This template was made with a newer version of the app. Update the app and try again.')
+  }
 
   // Re-store every image; ids are content hashes, so they are recomputed rather than trusted.
   const idMap = new Map<AssetId, AssetId>()
@@ -338,7 +537,7 @@ export function importTemplateBundle(text: string): QDoc {
   const settings = getSettings()
   const now = new Date().toISOString()
   const remapped = remapAssets(template, (a) => idMap.get(a) ?? a)
-  return saveDoc({
+  return {
     ...remapped,
     id: uid(),
     kind: 'template',
@@ -350,6 +549,35 @@ export function importTemplateBundle(text: string): QDoc {
       ? remapped.accountId
       : settings.defaultAccountId,
     createdAt: now,
-    updatedAt: now
+    updatedAt: now,
+    dataVersion: DATA_VERSION
+  }
+}
+
+/** Imports a bundle as a new template. */
+export function importTemplateBundle(text: string): QDoc {
+  return saveDoc(readTemplateBundle(text))
+}
+
+const WORD_FILE_MAX_BYTES = 100 * 1024 * 1024
+
+/**
+ * Makes a new template from a Word file. `fallbackType` is what it becomes when the file
+ * itself does not say whether it is a quotation or an invoice.
+ */
+export function importWordFile(file: string, fallbackType: DocType): { doc: QDoc; notes: string[] } {
+  if (fs.statSync(file).size > WORD_FILE_MAX_BYTES) {
+    throw new DocxError('This Word file is too large to make a template from (over 100 MB).')
+  }
+  const settings = getSettings()
+  const { doc, notes } = docxToTemplate(fs.readFileSync(file), {
+    name: path.basename(file).replace(/\.[^.]+$/, ''),
+    fallbackType,
+    accountId: settings.defaultAccountId,
+    storeImage: importAssetBuffer
   })
+  const taken = listDocs()
+    .filter((m) => m.kind === 'template' && m.docType === doc.docType)
+    .map((m) => m.name)
+  return { doc: saveDoc({ ...doc, name: freeName(doc.name, taken) }), notes }
 }

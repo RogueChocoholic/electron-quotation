@@ -1,9 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, shell } from 'electron'
 import fs from 'node:fs'
 import path from 'node:path'
-import { exportBaseName, safeFileName } from '@shared/calc'
+import { NEWER_DATA_MESSAGE, exportBaseName, isNewerData, safeFileName } from '@shared/calc'
 import { sanitizeDoc } from '@shared/sanitize'
-import type { Account, AppInfo, ExportResult, ImportResult, QDoc } from '@shared/types'
+import type { Account, AppInfo, DocType, ExportResult, ImportResult, QDoc } from '@shared/types'
+import { DocxError } from './docxRead'
 import { renderDocx } from './exportDocx'
 import { registerPrintIpc, renderPdf } from './exportPdf'
 import {
@@ -15,7 +16,9 @@ import {
   getSettings,
   importAssetFile,
   importTemplateBundle,
+  importWordFile,
   listDocs,
+  logLine,
   saveDoc,
   saveSettings
 } from './store'
@@ -133,6 +136,8 @@ export function registerIpc(): void {
   ipcMain.handle('templates:export', async (event, id: unknown): Promise<ExportResult> => {
     const doc = typeof id === 'string' ? getDoc(id) : null
     if (!doc) return { ok: false, error: 'The template could not be found.' }
+    // What this version does not know about the template would be missing from the file.
+    if (isNewerData(doc)) return { ok: false, error: NEWER_DATA_MESSAGE }
     return saveWithDialog(
       event,
       {
@@ -145,27 +150,48 @@ export function registerIpc(): void {
     )
   })
 
-  ipcMain.handle('templates:import', async (event): Promise<ImportResult> => {
+  // Template files are imported as they are; Word files are turned into templates.
+  ipcMain.handle('templates:import', async (event, docType: unknown): Promise<ImportResult> => {
+    const fallbackType: DocType = docType === 'invoice' ? 'invoice' : 'quotation'
     const win = owner(event)
     const options: Electron.OpenDialogOptions = {
-      title: 'Import templates',
+      title: 'Import templates or Word documents',
       defaultPath: startDir(),
       properties: ['openFile', 'multiSelections'],
-      filters: [{ name: 'Quotation Maker template', extensions: [TEMPLATE_EXT] }]
+      filters: [
+        { name: 'Templates and Word documents', extensions: [TEMPLATE_EXT, 'docx'] },
+        { name: 'Quotation Maker template', extensions: [TEMPLATE_EXT] },
+        { name: 'Word document', extensions: ['docx'] }
+      ]
     }
     const picked = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
     if (picked.canceled || picked.filePaths.length === 0) return { ok: false, canceled: true }
+    const many = picked.filePaths.length > 1
     const ids: string[] = []
     const errors: string[] = []
+    const notes: string[] = []
     for (const file of picked.filePaths) {
+      const name = path.basename(file)
       try {
-        ids.push(importTemplateBundle(await fs.promises.readFile(file, 'utf8')).id)
+        if (/\.docx?$/i.test(name)) {
+          const made = importWordFile(file, fallbackType)
+          ids.push(made.doc.id)
+          notes.push(...made.notes.map((n) => (many ? `${name}: ${n}` : n)))
+        } else {
+          ids.push(importTemplateBundle(await fs.promises.readFile(file, 'utf8')).id)
+        }
       } catch (err) {
-        errors.push(`${path.basename(file)}: ${message(err)}`)
+        if (/\.docx?$/i.test(name) && !(err instanceof DocxError)) {
+          // Not a message written for the user: keep the details for whoever looks into it.
+          logLine(`The Word file ${name} could not be turned into a template`, err)
+          errors.push(`${name}: This Word file could not be turned into a template.`)
+        } else {
+          errors.push(`${name}: ${message(err)}`)
+        }
       }
     }
     lastDir = path.dirname(picked.filePaths[0])
-    return { ok: errors.length === 0, ids, error: errors.join('\n') || undefined }
+    return { ok: errors.length === 0, ids, error: errors.join('\n') || undefined, notes: notes.length ? notes : undefined }
   })
 
   ipcMain.handle('export:pdf', async (event, input: unknown): Promise<ExportResult> => {

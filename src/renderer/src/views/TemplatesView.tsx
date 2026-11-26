@@ -45,7 +45,7 @@ export function TemplatesView() {
 
   const importTemplates = (): Promise<void> =>
     run(async () => {
-      const result = await window.api.templates.importFile()
+      const result = await window.api.templates.importFile(mode)
       if (result.canceled) return
       const count = result.ids?.length ?? 0
       if (count > 0) toast({ kind: 'success', message: count === 1 ? 'Template imported.' : `${count} templates imported.` })
@@ -54,6 +54,25 @@ export function TemplatesView() {
       const imported = (await window.api.docs.list()).filter((m) => result.ids?.includes(m.id))
       if (imported.length > 0 && imported.every((m) => m.docType !== mode)) setMode(imported[0].docType)
       else await reload()
+      // A template made from a Word file is a first draft; say what to look over in it.
+      if (result.notes?.length && imported.length > 0) {
+        const open = await confirm({
+          title: 'Template made from the Word file',
+          body: (
+            <>
+              <p>The template is a first draft. Look it over before using it:</p>
+              <ul className="modal-list">
+                {result.notes.map((note) => (
+                  <li key={note}>{note}</li>
+                ))}
+              </ul>
+            </>
+          ),
+          confirmLabel: imported.length === 1 ? 'Open the template' : 'OK',
+          cancelLabel: 'Close'
+        })
+        if (open && imported.length === 1) edit(imported[0].id)
+      }
     })
 
   const exportTemplate = (m: DocMeta): Promise<void> =>
@@ -112,7 +131,11 @@ export function TemplatesView() {
           <p className="view-sub">A template holds the design and the default text for new {words.many}.</p>
         </div>
         <div className="view-actions">
-          <Button icon={<IconUpload />} onClick={() => void importTemplates()}>
+          <Button
+            icon={<IconUpload />}
+            title="Import template files, or make a template from a Word document (.docx)"
+            onClick={() => void importTemplates()}
+          >
             Import
           </Button>
           <Button variant="primary" icon={<IconPlus />} onClick={(e) => addMenu(e.currentTarget)}>
@@ -127,7 +150,10 @@ export function TemplatesView() {
             <IconTemplate />
           </div>
           <h2>No {words.one} templates</h2>
-          <p>Start from the built-in design, a blank page, or import a template file from another PC.</p>
+          <p>
+            Start from the built-in design or a blank page, or import a template file from another PC or a Word
+            document to make one from.
+          </p>
           <Button variant="primary" icon={<IconPlus />} onClick={(e) => addMenu(e.currentTarget)}>
             New template
           </Button>

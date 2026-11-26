@@ -208,6 +208,12 @@ export interface QDoc {
   blocks: Block[]
   createdAt: string
   updatedAt: string
+  /**
+   * The data format of the app version that last saved this document (see DATA_VERSION).
+   * 0 for documents saved before the field existed. A document with a higher number than
+   * the running app knows was saved by a newer version, and is not opened or overwritten.
+   */
+  dataVersion: number
 }
 
 export interface DocMeta {
@@ -296,6 +302,8 @@ export interface ImportResult {
   canceled?: boolean
   ids?: string[]
   error?: string
+  /** Things to check in a template that was made from a Word file. */
+  notes?: string[]
 }
 
 export interface AppInfo {
@@ -331,7 +339,11 @@ export interface Api {
   }
   templates: {
     exportFile(id: string): Promise<ExportResult>
-    importFile(): Promise<ImportResult>
+    /**
+     * Imports template files (.qtpl) and turns Word files (.docx) into templates.
+     * `docType` is what a Word file becomes when it does not say what it is.
+     */
+    importFile(docType: DocType): Promise<ImportResult>
   }
   exporter: {
     pdf(doc: QDoc): Promise<ExportResult>

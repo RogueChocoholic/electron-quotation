@@ -1,10 +1,12 @@
-import { todayStr, uid } from '@shared/calc'
+import { NEWER_DATA_MESSAGE, isNewerData, todayStr, uid } from '@shared/calc'
 import { buildBlankTemplate } from '@shared/seed'
 import type { DocType, QDoc } from '@shared/types'
 
 async function load(id: string): Promise<QDoc> {
   const doc = await window.api.docs.get(id)
   if (!doc) throw new Error('The document could not be found. It may have been deleted.')
+  // A copy made by an older app would silently lose what that app does not know about.
+  if (isNewerData(doc)) throw new Error(NEWER_DATA_MESSAGE)
   return doc
 }
 

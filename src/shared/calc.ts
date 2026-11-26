@@ -12,6 +12,19 @@ import type {
   Settings
 } from './types'
 
+/**
+ * The format of saved documents. Raise it by one in every release that adds something to
+ * what a document stores: an older app would drop what it does not know when it saves, so
+ * it refuses to open or overwrite a document with a higher number than its own.
+ */
+export const DATA_VERSION = 1
+
+export const NEWER_DATA_MESSAGE =
+  'This was last saved by a newer version of the app. Update the app on this PC to open or change it.'
+
+/** True when the document was saved by a newer app than the one running. */
+export const isNewerData = (doc: Pick<QDoc, 'dataVersion'>): boolean => doc.dataVersion > DATA_VERSION
+
 /** Page geometry in mm (A4 portrait). */
 export const PAGE_W = 210
 export const PAGE_H = 297

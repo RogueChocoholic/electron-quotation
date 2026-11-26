@@ -359,6 +359,8 @@ export interface ConfirmOptions {
   title: string
   body: ReactNode
   confirmLabel: string
+  /** Label of the other button; "Cancel" unless given. */
+  cancelLabel?: string
   danger?: boolean
 }
 
@@ -412,7 +414,7 @@ export function UiProvider({ children }: { children: ReactNode }) {
               onClose={() => answer(false)}
               footer={
                 <>
-                  <Button onClick={() => answer(false)}>Cancel</Button>
+                  <Button onClick={() => answer(false)}>{confirmState.cancelLabel ?? 'Cancel'}</Button>
                   <Button variant={confirmState.danger ? 'danger' : 'primary'} autoFocus onClick={() => answer(true)}>
                     {confirmState.confirmLabel}
                   </Button>

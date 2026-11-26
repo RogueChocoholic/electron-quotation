@@ -217,7 +217,8 @@ export function sanitizeDoc(v: unknown): QDoc | null {
       return clean ? [clean] : []
     }),
     createdAt: str(d.createdAt, now),
-    updatedAt: str(d.updatedAt, now)
+    updatedAt: str(d.updatedAt, now),
+    dataVersion: Math.round(num(d.dataVersion, 0, 0, 999999))
   }
 }
 

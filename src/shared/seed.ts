@@ -1,4 +1,4 @@
-import { ITEM_AMOUNT_W, uid } from './calc'
+import { DATA_VERSION, ITEM_AMOUNT_W, uid } from './calc'
 import type {
   Account,
   Block,
@@ -177,9 +177,9 @@ export interface SeedAssets {
   photoInside: PickedImage
 }
 
-function stamp(): Pick<QDoc, 'createdAt' | 'updatedAt'> {
+function stamp(): Pick<QDoc, 'createdAt' | 'updatedAt' | 'dataVersion'> {
   const now = new Date().toISOString()
-  return { createdAt: now, updatedAt: now }
+  return { createdAt: now, updatedAt: now, dataVersion: DATA_VERSION }
 }
 
 /** The letterhead both built-in designs share; only the title beside the logo differs. */

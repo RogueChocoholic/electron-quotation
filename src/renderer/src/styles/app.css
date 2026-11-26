@@ -883,6 +883,20 @@ select.input {
   color: var(--text);
 }
 
+.modal-text p {
+  margin: 0 0 8px;
+}
+
+.modal-list {
+  max-width: 520px;
+  margin: 0;
+  padding-left: 18px;
+}
+
+.modal-list li + li {
+  margin-top: 6px;
+}
+
 .modal-foot {
   display: flex;
   justify-content: flex-end;

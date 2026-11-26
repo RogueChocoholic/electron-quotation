@@ -25,7 +25,7 @@ const api: Api = {
   },
   templates: {
     exportFile: (id) => ipcRenderer.invoke('templates:export', id),
-    importFile: () => ipcRenderer.invoke('templates:import')
+    importFile: (docType) => ipcRenderer.invoke('templates:import', docType)
   },
   exporter: {
     pdf: (doc) => ipcRenderer.invoke('export:pdf', doc),

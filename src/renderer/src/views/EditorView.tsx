@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { DOC_WORDS, customerOf } from '@shared/calc'
+import { DOC_WORDS, NEWER_DATA_MESSAGE, customerOf, isNewerData } from '@shared/calc'
 import type { QDoc } from '@shared/types'
 import { saveAsTemplate } from '../app/actions'
 import { errorText, useApp } from '../app/context'
@@ -23,7 +23,7 @@ export function EditorView({ id, from }: { id: string; from: 'documents' | 'temp
   const openMenu = useMenu()
 
   const [doc, setDoc] = useState<QDoc | null>(null)
-  const [missing, setMissing] = useState(false)
+  const [problem, setProblem] = useState<'missing' | 'newer' | null>(null)
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [tab, setTab] = useState<InspectorTab>('document')
   const [zoom, setZoom] = useState(1)
@@ -46,7 +46,12 @@ export function EditorView({ id, from }: { id: string; from: 'documents' | 'temp
         const [loaded, list] = await Promise.all([window.api.docs.get(id), window.api.docs.list()])
         if (!alive) return
         if (!loaded) {
-          setMissing(true)
+          setProblem('missing')
+          return
+        }
+        // An older app would drop what it does not know about as soon as it saved.
+        if (isNewerData(loaded)) {
+          setProblem('newer')
           return
         }
         docRef.current = loaded
@@ -66,7 +71,7 @@ export function EditorView({ id, from }: { id: string; from: 'documents' | 'temp
       } catch (err) {
         if (alive) {
           toast({ kind: 'error', message: errorText(err) })
-          setMissing(true)
+          setProblem('missing')
         }
       }
     })()
@@ -296,12 +301,12 @@ export function EditorView({ id, from }: { id: string; from: 'documents' | 'temp
     }
   }
 
-  if (missing) {
+  if (problem) {
     return (
       <div className="editor">
         <div className="empty">
-          <h2>This document could not be opened</h2>
-          <p>It may have been deleted.</p>
+          <h2>{problem === 'newer' ? 'Update the app to open this' : 'This document could not be opened'}</h2>
+          <p>{problem === 'newer' ? NEWER_DATA_MESSAGE : 'It may have been deleted.'}</p>
           <Button onClick={back}>Back</Button>
         </div>
       </div>
